@@ -1,0 +1,6 @@
+.env
+venv
+database.db
+reports/
+__pycache__/
+trading_report.log
