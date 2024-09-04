@@ -17,17 +17,12 @@ import matplotlib.dates as mdates
 from io import BytesIO
 from decimal import Decimal
 import logging
-import boto3
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
 import argparse
 
 # TO DO
-# add 30 days trailing fee calculation to the report
-# add logging
-# add error handling
-# then we can test pushing to aws
+# make the graphic of the report better
+# remove trades today, considering that it will print the report only once per week it wont make any sense
+# consider adding some trailing data
 
 # Set up logging
 logging.basicConfig(filename='trading_report.log', level=logging.INFO,
@@ -152,18 +147,18 @@ def get_all_open_positions(session):
 def parse_executions(executions, start_time):
     return [
         {
-            "symbol": exec["symbol"],
-            "side": exec["side"],
-            "price": float(exec["execPrice"]),
-            "quantity": float(exec["execQty"]),
-            "value": float(exec["execValue"]),
-            "fee": float(exec["execFee"]),
-            "time": datetime.datetime.fromtimestamp(int(exec["execTime"]) / 1000),
-            "type": exec["execType"],
-            "orderId": exec["orderId"]
+            "symbol": execution["symbol"],
+            "side": execution["side"],
+            "price": float(execution["execPrice"]),
+            "quantity": float(execution["execQty"]),
+            "value": float(execution["execValue"]),
+            "fee": float(execution["execFee"]),
+            "time": datetime.datetime.fromtimestamp(int(execution["execTime"]) / 1000),
+            "type": execution["execType"],
+            "orderId": execution["orderId"]
         }
-        for exec in executions
-        if exec["execType"] == "Trade" and int(exec["execTime"]) >= int(start_time.timestamp() * 1000)
+        for execution in executions
+        if execution["execType"] == "Trade" and int(execution["execTime"]) >= int(start_time.timestamp() * 1000)
     ]
 
 def last_executions(session):
@@ -225,9 +220,9 @@ def determine_trade_action(trades, open_positions):
     
         # Determine action based on how the position changed
         if now_position == 0:
-            action = f"Closing {"Long" if side == "Sell" else "Short"}"
+            action = f"Closing {'Long' if side == 'Sell' else 'Short'}"
         elif now_position > 0:
-            action = f"Opening {"Long" if side == "Buy" else "Short"}"
+            action = f"Opening {'Long' if side == 'Buy' else 'Short'}"
         
         positions[symbol] = {"size": now_position, "side": "Long" if now_position > 0 else "Short"}
         
@@ -303,16 +298,16 @@ def process_fees_and_volume(session):
             response = last_executions(session)
             executions = response["result"]["list"]
 
-            for exec in executions:
-                exec_time = datetime.datetime.fromtimestamp(int(exec["execTime"]) / 1000)
+            for execution in executions:
+                exec_time = datetime.datetime.fromtimestamp(int(execution["execTime"]) / 1000)
                 if exec_time < today:
                     break
 
-                fee = Decimal(exec["execFee"])
-                if exec["execType"] == "Trade":
+                fee = Decimal(execution["execFee"])
+                if execution["execType"] == "Trade":
                     trading_fees += fee
-                    total_volume += Decimal(exec["execValue"])
-                elif exec["execType"] == "Funding":
+                    total_volume += Decimal(execution["execValue"])
+                elif execution["execType"] == "Funding":
                     funding_fees += fee
 
             cursor = response["result"].get("nextPageCursor")
@@ -422,6 +417,7 @@ def get_last_seven_days_fees(account_name):
 
     return result[0] if result else 0
 
+
 # DATA 
 def collect_daily_data():
     try:
@@ -438,95 +434,20 @@ def collect_daily_data():
         logging.error(f"Error in daily data collection: {str(e)}")
         print(f"An error occurred. Please check the log file for details.")
 
-def get_weekly_report_data(account_name):
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
-    
-    seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
-    
-    cursor.execute('''
-    SELECT * FROM daily_reports
-    WHERE account_name = ? AND date >= ?
-    ORDER BY date
-    ''', (account_name, seven_days_ago))
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
-    # Process and aggregate the data
-    total_trades = sum(row['trades_today'] for row in rows)
-    avg_daily_trades = total_trades / 7 if rows else 0
-    start_equity = rows[0]['equity'] if rows else 0
-    end_equity = rows[-1]['equity'] if rows else 0
-    equity_change = end_equity - start_equity
-    equity_change_percentage = (equity_change / start_equity) * 100 if start_equity else 0
-    
-    total_fees = sum(row['total_fees'] for row in rows)
-    total_volume = sum(row['total_volume'] for row in rows)
-    
-    weekly_data = {
-        'account_name': account_name,
-        'start_date': seven_days_ago,
-        'end_date': datetime.datetime.now().strftime('%Y-%m-%d'),
-        'daily_data': rows,
-        'summary': {
-            'total_trades': total_trades,
-            'avg_daily_trades': avg_daily_trades,
-            'start_equity': start_equity,
-            'end_equity': end_equity,
-            'equity_change': equity_change,
-            'equity_change_percentage': equity_change_percentage,
-            'total_fees': total_fees,
-            'total_volume': total_volume,
-        }
-    }
-    
-    return weekly_data
-
 def generate_weekly_report():
     try:
         accounts = get_accounts_from_env()
         
         for account in accounts:
             logging.info(f"Generating weekly report for {account['name']}...")
-            weekly_report_data = get_weekly_report_data(account['name'])
+            weekly_report_data = generate_report_for_account(account)  # Pass the entire account dictionary
             pdf_path = export_report_to_pdf(weekly_report_data)
-            send_email_with_attachment(account['name'], account['email'], pdf_path)
+            # send_email_with_attachment(account['name'], account['email'], pdf_path)
             
         logging.info("Weekly reports generated and sent successfully.")
     except Exception as e:
         logging.error(f"Error in weekly report generation: {str(e)}")
         print(f"An error occurred. Please check the log file for details.")
-
-
-def send_email_with_attachment(account_name, account_email, pdf_path):
-    # Use boto3 to send an email with the PDF attachment
-    ses_client = boto3.client('ses', region_name='eu-central-1a')
-    
-    msg = MIMEMultipart()
-    msg['Subject'] = f'Weekly Trading Report - {account_name}'
-    msg['From'] = 'fabiettigabriele@gmail.com'
-    msg['To'] = f'{account_email}'
-    
-    # Add body to email
-    body = MIMEText('Please find attached the weekly trading report.')
-    msg.attach(body)
-    
-    # Add PDF attachment
-    with open(pdf_path, 'rb') as f:
-        part = MIMEApplication(f.read(), Name=f'weekly_report_{account_name}.pdf')
-    part['Content-Disposition'] = f'attachment; filename="{part.get_filename()}"'
-    msg.attach(part)
-    
-    # Send email
-    response = ses_client.send_raw_email(
-        Source=msg['From'],
-        Destinations=[msg['To']],
-        RawMessage={'Data': msg.as_string()}
-    )
-    
-    return response
-
 
 # REPORT
 def export_report_to_pdf(report_data):
@@ -748,6 +669,8 @@ def export_report_to_pdf(report_data):
     doc.build(elements)
     print(f"Report exported to {filepath}")
 
+    return filepath
+
 def generate_report_for_account(account):
     try:
         session = HTTP(
@@ -821,13 +744,46 @@ def generate_report_for_account(account):
 
 def main():
     parser = argparse.ArgumentParser(description='Trading Report Generator')
-    parser.add_argument('--weekly', action='store_true', help='Generate weekly report')
+    parser.add_argument('--force-weekly', action='store_true', help='Force generate weekly report')
     args = parser.parse_args()
 
-    if args.weekly:
+    # Always run daily data collection
+    collect_daily_data()
+
+    # Check if it's Sunday (weekday() returns 6 for Sunday) or if --force-weekly flag is used
+    # to change the day bare in mind: 0=monday, 6=sunday, ecc
+    if datetime.datetime.now().weekday() == 6 or args.force_weekly:
         generate_weekly_report()
-    else:
-        collect_daily_data()
+
+
+# to test manually run this 
+'''
+def main():
+    try:
+        logging.info("Starting report generation process...")
+        
+        # Initialize database and collect daily data
+        initialize_database()
+        accounts = get_accounts_from_env()
+        
+        for account in accounts:
+            logging.info(f"Collecting daily data for {account['name']}...")
+            daily_report_data = generate_report_for_account(account)
+            store_daily_report(daily_report_data)
+            
+            logging.info(f"Generating report for {account['name']}...")
+            pdf_path = export_report_to_pdf(daily_report_data)
+            
+            # Optionally, you can send an email with the report
+            # send_email_with_attachment(account['name'], account.get('email'), pdf_path)
+            
+            logging.info(f"Report generated and saved at: {pdf_path}")
+        
+        logging.info("Report generation process completed successfully.")
+    except Exception as e:
+        logging.error(f"Error in report generation process: {str(e)}")
+        print(f"An error occurred. Please check the log file for details.")
+'''
 
 if __name__ == "__main__":
     main()
