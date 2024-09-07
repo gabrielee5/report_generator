@@ -10,7 +10,6 @@ from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor
 from reportlab.platypus import Image
 import sqlite3
-from tabulate import tabulate
 import os
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -721,35 +720,6 @@ def main():
     if datetime.datetime.now().weekday() == 6 or args.force_weekly:
         generate_weekly_report()
 
-
-# to test manually run this 
-'''
-def main():
-    try:
-        logging.info("Starting report generation process...")
-        
-        # Initialize database and collect daily data
-        initialize_database()
-        accounts = get_accounts_from_env()
-        
-        for account in accounts:
-            logging.info(f"Collecting daily data for {account['name']}...")
-            daily_report_data = generate_report_for_account(account)
-            store_daily_report(daily_report_data)
-            
-            logging.info(f"Generating report for {account['name']}...")
-            pdf_path = export_report_to_pdf(daily_report_data)
-            
-            # Optionally, you can send an email with the report
-            # send_email_with_attachment(account['name'], account.get('email'), pdf_path)
-            
-            logging.info(f"Report generated and saved at: {pdf_path}")
-        
-        logging.info("Report generation process completed successfully.")
-    except Exception as e:
-        logging.error(f"Error in report generation process: {str(e)}")
-        print(f"An error occurred. Please check the log file for details.")
-'''
 
 if __name__ == "__main__":
     main()
