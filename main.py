@@ -24,6 +24,8 @@ import argparse
 # remove trades today, considering that it will print the report only once per week it wont make any sense
 # consider adding some trailing data
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # Set up logging
 logging.basicConfig(filename='trading_report.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -568,49 +570,13 @@ def export_report_to_pdf(report_data):
         elements.append(Paragraph("No open positions.", styles['Normal']))
     elements.append(Spacer(1, 0.25*inch))
 
-    # Today's Trades
-    elements.append(Paragraph("4. Today's Trades", styles['Heading2']))
-    if report_data['trades']:
-        trades_data = [["Symbol", "Action", "Price", "Quantity", "Value", "Fee", "Time"]]
-        for trade in report_data['trades']:
-            trades_data.append([
-                trade["symbol"],
-                trade["action"],
-                f"{trade['price']:.4f}",
-                f"{trade['quantity']:.4f}",
-                f"{trade['value']:.2f}",
-                f"{trade['fee']:.4f}",
-                trade["time"].strftime("%Y-%m-%d %H:%M:%S")
-            ])
-        trades_table = Table(trades_data)
-        trades_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), secondary_color),
-            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('TOPPADDING', (0, 1), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        elements.append(trades_table)
-    else:
-        elements.append(Paragraph("No trades today.", styles['Normal']))
-    elements.append(Spacer(1, 0.25*inch))
-
     # Equity Curve
-    elements.append(Paragraph("5. Equity Curve", styles['Heading2']))
+    elements.append(Paragraph("4. Equity Curve", styles['Heading2']))
     equity_curve_img = create_equity_curve_plot(report_data['account_name'])
     elements.append(Image(equity_curve_img, width=8*inch, height=4*inch))
 
     # Add Fees section
-    elements.append(Paragraph("6. Daily Fees", styles['Heading2']))
+    elements.append(Paragraph("5. Daily Fees", styles['Heading2']))
     fees_data = [
         ["Fee Type", "Amount (USDT)"], # add trailing 30 days fees
         ["Funding Fees", f"{report_data['funding_fees']}"],
@@ -638,7 +604,7 @@ def export_report_to_pdf(report_data):
     elements.append(Paragraph("When the fees are negative it means it is money received.", styles['Normal']))
 
     # Add Weekly Comparison section
-    elements.append(Paragraph("7. Weekly Comparison", styles['Heading2']))
+    elements.append(Paragraph("6. Weekly Comparison", styles['Heading2']))
     weekly_comparison_data = [
         ["Metric", "Value"],
         ["Previous Week Equity", f"{report_data['previous_week_equity_usdt']:.2f} USDT" if report_data['previous_week_equity_usdt'] is not None else "N/A"],
