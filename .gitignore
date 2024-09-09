@@ -5,3 +5,4 @@ reports/
 __pycache__/
 trading_report.log
 .DS_Store
+cron.log

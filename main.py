@@ -20,8 +20,6 @@ import argparse
 
 # TO DO
 # make the graphic of the report better
-# remove trades today, considering that it will print the report only once per week it wont make any sense
-# consider adding some trailing data
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -400,55 +398,35 @@ def get_previous_week_equity(account_name):
     else:
         return None
 
-def get_last_seven_days_fees(account_name):
+def get_last_x_days_metrics(account_name, x_days=7):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
 
-    seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+    x_days_ago = (datetime.datetime.now() - datetime.timedelta(days=x_days)).strftime('%Y-%m-%d')
 
     query = '''
-    SELECT SUM(total_fees)
+    SELECT SUM(funding_fees), SUM(trading_fees), SUM(total_fees), SUM(trades_today), SUM(total_volume)
     FROM daily_reports
     WHERE account_name = ? AND date >= ?
     '''
     
-    cursor.execute(query, (account_name, seven_days_ago))
+    cursor.execute(query, (account_name, x_days_ago))
     result = cursor.fetchone()
     conn.close()
 
-    return result[0] if result else 0
+    funding_fees = result[0] if result[0] is not None else 0
+    trading_fees = result[1] if result[1] is not None else 0
+    fees = result[2] if result[2] is not None else 0
+    trades = result[3] if result[3] is not None else 0
+    volume = result[4] if result[4] is not None else 0
 
-
-# DATA 
-def collect_daily_data():
-    try:
-        initialize_database()
-        accounts = get_accounts_from_env()
-        
-        for account in accounts:
-            logging.info(f"Collecting daily data for {account['name']}...")
-            report_data = generate_report_for_account(account)
-            store_daily_report(report_data)
-            
-        logging.info("Daily data collection completed successfully.")
-    except Exception as e:
-        logging.error(f"Error in daily data collection: {str(e)}")
-        print(f"An error occurred. Please check the log file for details.")
-
-def generate_weekly_report():
-    try:
-        accounts = get_accounts_from_env()
-        
-        for account in accounts:
-            logging.info(f"Generating weekly report for {account['name']}...")
-            weekly_report_data = generate_report_for_account(account)  # Pass the entire account dictionary
-            pdf_path = export_report_to_pdf(weekly_report_data)
-            # send_email_with_attachment(account['name'], account['email'], pdf_path)
-            
-        logging.info("Weekly reports generated and sent successfully.")
-    except Exception as e:
-        logging.error(f"Error in weekly report generation: {str(e)}")
-        print(f"An error occurred. Please check the log file for details.")
+    return {
+        'funding_fees': funding_fees,
+        'trading_fees': trading_fees,
+        'total_fees': fees,
+        'trades': trades,
+        'volume': volume
+    }
 
 # REPORT
 def export_report_to_pdf(report_data):
@@ -467,13 +445,13 @@ def export_report_to_pdf(report_data):
     doc = SimpleDocTemplate(filepath, pagesize=landscape(letter), 
                             rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
 
-    elements = []
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Center', alignment=1))
-
     # Custom colors
     primary_color = HexColor("#2a5e35")
     secondary_color = HexColor("#E2E2E2")
+
+    elements = []
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Center', alignment=1, textColor=primary_color, fontSize=15))
 
     # Title
     title_style = ParagraphStyle(
@@ -493,7 +471,7 @@ def export_report_to_pdf(report_data):
         ["Current Equity", f"{report_data['equity']:.2f} USDT"],
         ["Equity in BTC", f"{report_data['equity_btc']:.6f} BTC"],
         ["Open Positions", str(len(report_data['open_positions']))],
-        ["Trades Today", str(report_data['trades_today'])],
+        ["Trades This Week", str(report_data['last_x_days_trades'])],
     ]
     account_table = Table(account_summary, colWidths=[2*inch, 2*inch])
     account_table.setStyle(TableStyle([
@@ -574,13 +552,15 @@ def export_report_to_pdf(report_data):
     equity_curve_img = create_equity_curve_plot(report_data['account_name'])
     elements.append(Image(equity_curve_img, width=8*inch, height=4*inch))
 
-    # Add Fees section
-    elements.append(Paragraph("5. Daily Fees", styles['Heading2']))
+    # Metrics section
+    elements.append(Paragraph("5. Weekly Metrics", styles['Heading2']))
     fees_data = [
-        ["Fee Type", "Amount (USDT)"], # add trailing 30 days fees
-        ["Funding Fees", f"{report_data['funding_fees']}"],
-        ["Trading Fees", f"{report_data['trading_fees']}"],
-        ["Total Fees", f"{report_data['total_fees']}"]
+        ["Metric", "Amount (USDT)"],
+        ["N. Trades", f"{report_data['last_x_days_trades']}"],
+        ["Volume", f"{report_data['last_x_days_volume']:.2f}"],
+        ["Funding Fees", f"{report_data['last_x_days_funding_fees']:.2f}"],
+        ["Trading Fees", f"{report_data['last_x_days_trading_fees']:.2f}"],
+        ["Total Fees", f"{report_data['last_x_days_total_fees']:.2f}"]
     ]
     fees_table = Table(fees_data, colWidths=[2*inch, 2*inch])
     fees_table.setStyle(TableStyle([
@@ -610,7 +590,6 @@ def export_report_to_pdf(report_data):
         ["Equity Difference", f"{report_data['equity_difference_usdt']:.2f} USDT" if report_data['equity_difference_usdt'] is not None else "N/A"],
         ["Previous Week Equity (BTC)", f"{report_data['previous_week_equity_btc']:.2f} USDT" if report_data['previous_week_equity_btc'] is not None else "N/A"],
         ["Equity Difference (BTC)", f"{report_data['equity_difference_btc']:.2f} USDT" if report_data['equity_difference_btc'] is not None else "N/A"],
-        ["Last 7 Days Fees", f"{report_data['last_seven_days_fees']:.2f} USDT"]
     ]
     weekly_comparison_table = Table(weekly_comparison_data, colWidths=[3*inch, 2*inch])
     weekly_comparison_table.setStyle(TableStyle([
@@ -643,6 +622,7 @@ def generate_report_for_account(account):
             api_secret=account["api_secret"]
         )
 
+        x_days = 7
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         open_positions = get_all_open_positions(session)
         trades_today = get_all_trades_today(session)
@@ -660,7 +640,7 @@ def generate_report_for_account(account):
             equity_difference_usdt = None
             equity_difference_btc = None
 
-        last_seven_days_fees = get_last_seven_days_fees(account["name"])
+        metrics = get_last_x_days_metrics(account["name"], x_days)
 
         report_data = {
             "account_name": account["name"],
@@ -696,7 +676,11 @@ def generate_report_for_account(account):
             "equity_difference_usdt": equity_difference_usdt,
             "previous_week_equity_btc": previous_week_equity['equity_btc'] if previous_week_equity else None,
             "equity_difference_btc": equity_difference_btc,
-            "last_seven_days_fees": last_seven_days_fees,
+            "last_x_days_funding_fees": metrics['funding_fees'],
+            "last_x_days_trading_fees": metrics['trading_fees'],            
+            "last_x_days_total_fees": metrics['total_fees'],
+            "last_x_days_trades": metrics['trades'],
+            "last_x_days_volume": metrics['volume'],
         }
         
         store_daily_report(report_data)
@@ -705,6 +689,37 @@ def generate_report_for_account(account):
     except Exception as e:
         logging.error(f"Error generating report for account {account['name']}: {str(e)}")
         raise
+
+# DATA 
+def collect_daily_data():
+    try:
+        initialize_database()
+        accounts = get_accounts_from_env()
+        
+        for account in accounts:
+            logging.info(f"Collecting daily data for {account['name']}...")
+            report_data = generate_report_for_account(account)
+            store_daily_report(report_data)
+            
+        logging.info("Daily data collection completed successfully.")
+    except Exception as e:
+        logging.error(f"Error in daily data collection: {str(e)}")
+        print(f"An error occurred. Please check the log file for details.")
+
+def generate_weekly_report():
+    try:
+        accounts = get_accounts_from_env()
+        
+        for account in accounts:
+            logging.info(f"Generating weekly report for {account['name']}...")
+            weekly_report_data = generate_report_for_account(account)  # Pass the entire account dictionary
+            pdf_path = export_report_to_pdf(weekly_report_data)
+            # send_email_with_attachment(account['name'], account['email'], pdf_path)
+            
+        logging.info("Weekly reports generated and sent successfully.")
+    except Exception as e:
+        logging.error(f"Error in weekly report generation: {str(e)}")
+        print(f"An error occurred. Please check the log file for details.")
 
 
 def main():
