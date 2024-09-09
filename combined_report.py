@@ -10,9 +10,26 @@ from reportlab.lib.enums import TA_CENTER
 import datetime
 import os
 import numpy as np
+import logging
+from functools import wraps
+
+# Set up logging
+logging.basicConfig(filename='trading_report.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+def log_errors(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logging.error(f"Error in {func.__name__}: {str(e)}")
+            raise
+    return wrapper
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+@log_errors
 def get_all_accounts():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -21,6 +38,7 @@ def get_all_accounts():
     conn.close()
     return accounts
 
+@log_errors
 def get_latest_data_for_accounts():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -51,6 +69,7 @@ def get_latest_data_for_accounts():
     conn.close()
     return latest_data
 
+@log_errors
 def create_combined_equity_curve_plot(days=30):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -70,7 +89,6 @@ def create_combined_equity_curve_plot(days=30):
         rows = cursor.fetchall()
         dates, equity = zip(*[(datetime.datetime.strptime(row[0], '%Y-%m-%d'), row[1]) for row in reversed(rows)])
         
-        # Normalize the equity curve
         normalized_equity = [value / equity[0] * 100 for value in equity]
         
         plt.plot(dates, normalized_equity, marker='o', label=account)
@@ -82,11 +100,7 @@ def create_combined_equity_curve_plot(days=30):
     plt.grid(True)
     plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
     plt.gcf().autofmt_xdate()
-    
-    # Set y-axis to percentage
     plt.gca().yaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter())
-
-    # Add horizontal line at 100%
     plt.axhline(y=100, color='r', linestyle='--', alpha=0.5)
 
     img_buffer = BytesIO()
@@ -97,6 +111,7 @@ def create_combined_equity_curve_plot(days=30):
     conn.close()
     return img_buffer
 
+@log_errors
 def create_total_equity_curve_plot(days=30):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -144,6 +159,7 @@ def create_total_equity_curve_plot(days=30):
     conn.close()
     return img_buffer
 
+@log_errors
 def get_x_day_fees_and_volumes(x_days=7):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -175,6 +191,7 @@ def get_x_day_fees_and_volumes(x_days=7):
     conn.close()
     return fees_and_volumes
 
+@log_errors
 def get_weekly_performance():
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
@@ -209,6 +226,7 @@ def get_weekly_performance():
     conn.close()
     return performance
 
+@log_errors
 def create_table(data, title, styles):
     table = Table(data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
     table.setStyle(TableStyle([
@@ -229,20 +247,18 @@ def create_table(data, title, styles):
     ]))
     return [Paragraph(title, styles['Heading2']), table, Spacer(1, 0.25*inch)]
 
+@log_errors
 def generate_combined_report(x_day=7):
     x_day_fees_and_volumes = get_x_day_fees_and_volumes(x_day)
     latest_data = get_latest_data_for_accounts()
     weekly_performance = get_weekly_performance()
     
-    # Create 'reports' directory if it doesn't exist
     reports_dir = 'reports'
     os.makedirs(reports_dir, exist_ok=True)
 
-    # Create account-specific directory
     account_dir = os.path.join(reports_dir, 'total')
     os.makedirs(account_dir, exist_ok=True)
 
-    # Generate filename with current date
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     filename = f"combined_report_{today}.pdf"
     filepath = os.path.join(account_dir, filename)
@@ -253,16 +269,11 @@ def generate_combined_report(x_day=7):
     elements = []
     styles = getSampleStyleSheet()
 
-    # Custom styles
-    styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='CenteredHeading1', parent=styles['Heading1'], alignment=TA_CENTER))
 
-
-    # Title
     elements.append(Paragraph(f"Combined Trading Report - {today}", styles['CenteredHeading1']))
     elements.append(Spacer(1, 0.5*inch))
 
-    # Account Summary Table
     account_summary_data = [["Account", "Equity (USDT)", "Long Positions", "Short Positions", "Net Exposure"]]
     total_equity_usdt = 0
     total_long_positions = 0
@@ -292,7 +303,6 @@ def generate_combined_report(x_day=7):
 
     elements.extend(create_table(account_summary_data, "Account Summary", styles))
 
-    # 7-Day Fees and Volumes Table
     fees_volumes_data = [["Account", "Funding Fees", "Trading Fees", "Total Fees", "Total Volume"]]
     total_funding_fees = 0
     total_trading_fees = 0
@@ -322,7 +332,6 @@ def generate_combined_report(x_day=7):
 
     elements.extend(create_table(fees_volumes_data, f"{x_day}-Day Fees and Volumes", styles))
 
-    # Weekly Performance Table
     performance_data = [["Account", "Start Equity", "End Equity", "Performance", "Weight"]]
     total_start_equity = 0
     total_end_equity = 0
@@ -366,23 +375,27 @@ def generate_combined_report(x_day=7):
 
     elements.extend(create_table(performance_data, "Weekly Performance", styles))
 
-    # Add a page break before the graphs
-    # elements.append(PageBreak())
-
-    # Normalized Combined Equity Curve
     elements.append(Paragraph("Normalized Combined Equity Curve", styles['Heading2']))
     equity_curve_img = create_combined_equity_curve_plot()
     elements.append(Image(equity_curve_img, width=9*inch, height=4.5*inch))
     elements.append(Spacer(1, 0.25*inch))
 
-    # Total Equity Curve
     elements.append(Paragraph("Total Equity Curve", styles['Heading2']))
     total_equity_curve_img = create_total_equity_curve_plot()
     elements.append(Image(total_equity_curve_img, width=9*inch, height=4.5*inch))
 
-    doc.build(elements)
-    print(f"Combined report exported to {filepath}")
-    return filepath
+    try:
+        doc.build(elements)
+        logging.info(f"Combined report exported to {filepath}")
+        return filepath
+    except Exception as e:
+        logging.error(f"Error building PDF document: {str(e)}")
+        raise
 
 if __name__ == "__main__":
-    generate_combined_report()
+    try:
+        logging.info("Starting combined report generation...")
+        report_path = generate_combined_report()
+    except Exception as e:
+        logging.error(f"Error generating combined report: {str(e)}")
+        print(f"An error occurred while generating the report. Please check the log file for details.")
