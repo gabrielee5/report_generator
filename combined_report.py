@@ -2,10 +2,11 @@ import sqlite3
 import matplotlib.pyplot as plt
 from io import BytesIO
 from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER
 import datetime
 import os
 import numpy as np
@@ -174,10 +175,64 @@ def get_x_day_fees_and_volumes(x_days=7):
     conn.close()
     return fees_and_volumes
 
-def generate_combined_report():
-    x_day = 7
+def get_weekly_performance():
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+    accounts = get_all_accounts()
+    
+    today = datetime.date.today()
+    one_week_ago = today - datetime.timedelta(days=7)
+    
+    performance = {}
+    
+    for account in accounts:
+        cursor.execute("""
+            SELECT date, equity
+            FROM daily_reports 
+            WHERE account_name = ? AND date IN (?, ?)
+            ORDER BY date ASC
+        """, (account, one_week_ago.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
+        
+        results = cursor.fetchall()
+        if len(results) == 2:
+            start_date, start_equity = results[0]
+            end_date, end_equity = results[1]
+            percent_change = ((end_equity - start_equity) / start_equity) * 100
+            performance[account] = {
+                'start_equity': start_equity,
+                'end_equity': end_equity,
+                'percent_change': percent_change
+            }
+        else:
+            performance[account] = None
+    
+    conn.close()
+    return performance
+
+def create_table(data, title, styles):
+    table = Table(data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), HexColor("#2a5e35")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), HexColor("#FFFFFF")),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), HexColor("#EEEEEE")),
+        ('TEXTCOLOR', (0, 1), (-1, -1), HexColor("#000000")),
+        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, HexColor("#000000"))
+    ]))
+    return [Paragraph(title, styles['Heading2']), table, Spacer(1, 0.25*inch)]
+
+def generate_combined_report(x_day=7):
     x_day_fees_and_volumes = get_x_day_fees_and_volumes(x_day)
     latest_data = get_latest_data_for_accounts()
+    weekly_performance = get_weekly_performance()
     
     # Create 'reports' directory if it doesn't exist
     reports_dir = 'reports'
@@ -193,19 +248,21 @@ def generate_combined_report():
     filepath = os.path.join(account_dir, filename)
 
     doc = SimpleDocTemplate(filepath, pagesize=landscape(letter),
-                            rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+                            rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=18)
 
     elements = []
     styles = getSampleStyleSheet()
 
+    # Custom styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CenteredHeading1', parent=styles['Heading1'], alignment=TA_CENTER))
+
+
     # Title
-    title_style = getSampleStyleSheet()['Title']
-    title_style.textColor = HexColor("#2a5e35")
-    elements.append(Paragraph(f"Combined Trading Report - {today}", title_style))
-    elements.append(Spacer(1, 0.25*inch))
+    elements.append(Paragraph(f"Combined Trading Report - {today}", styles['CenteredHeading1']))
+    elements.append(Spacer(1, 0.5*inch))
 
     # Account Summary Table
-    elements.append(Paragraph("Account Summary", styles['Heading2']))
     account_summary_data = [["Account", "Equity (USDT)", "Long Positions", "Short Positions", "Net Exposure"]]
     total_equity_usdt = 0
     total_long_positions = 0
@@ -233,28 +290,9 @@ def generate_combined_report():
         f"{total_net_exposure:.2f}"
     ])
 
-    account_table = Table(account_summary_data)
-    account_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), HexColor("#2a5e35")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), HexColor("#FFFFFF")),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), HexColor("#EEEEEE")),
-        ('TEXTCOLOR', (0, 1), (-1, -1), HexColor("#000000")),
-        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 1, HexColor("#000000"))
-    ]))
-    elements.append(account_table)
-    elements.append(Spacer(1, 0.25*inch))
+    elements.extend(create_table(account_summary_data, "Account Summary", styles))
 
     # 7-Day Fees and Volumes Table
-    elements.append(Paragraph(f"{x_day}-Day Fees and Volumes", styles['Heading2']))
     fees_volumes_data = [["Account", "Funding Fees", "Trading Fees", "Total Fees", "Total Volume"]]
     total_funding_fees = 0
     total_trading_fees = 0
@@ -282,36 +320,65 @@ def generate_combined_report():
         f"{total_volume:.2f}"
     ])
 
-    fees_volumes_table = Table(fees_volumes_data)
-    fees_volumes_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), HexColor("#2a5e35")),
-        ('TEXTCOLOR', (0, 0), (-1, 0), HexColor("#FFFFFF")),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), HexColor("#EEEEEE")),
-        ('TEXTCOLOR', (0, 1), (-1, -1), HexColor("#000000")),
-        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 1, HexColor("#000000"))
-    ]))
-    elements.append(fees_volumes_table)
-    elements.append(Spacer(1, 0.25*inch))
+    elements.extend(create_table(fees_volumes_data, f"{x_day}-Day Fees and Volumes", styles))
+
+    # Weekly Performance Table
+    performance_data = [["Account", "Start Equity", "End Equity", "Performance", "Weight"]]
+    total_start_equity = 0
+    total_end_equity = 0
+    total_weighted_performance = 0
+
+    for account, data in weekly_performance.items():
+        if data is not None:
+            weight = data['start_equity'] / sum(d['start_equity'] for d in weekly_performance.values() if d is not None)
+            performance_data.append([
+                account,
+                f"{data['start_equity']:.2f}",
+                f"{data['end_equity']:.2f}",
+                f"{data['percent_change']:.2f}%",
+                f"{weight:.2%}"
+            ])
+            total_start_equity += data['start_equity']
+            total_end_equity += data['end_equity']
+            total_weighted_performance += data['percent_change'] * weight
+
+    if total_start_equity > 0:
+        total_performance = ((total_end_equity - total_start_equity) / total_start_equity) * 100
+        performance_data.append([
+            "Total",
+            f"{total_start_equity:.2f}",
+            f"{total_end_equity:.2f}",
+            f"{total_performance:.2f}%",
+            "100.00%"
+        ])
+        performance_data.append([
+            "Weighted Average",
+            "",
+            "",
+            f"{total_weighted_performance:.2f}%",
+            ""
+        ])
+    else:
+        performance_data.extend([
+            ["Total", "N/A", "N/A", "N/A", "N/A"],
+            ["Weighted Average", "", "", "N/A", ""]
+        ])
+
+    elements.extend(create_table(performance_data, "Weekly Performance", styles))
+
+    # Add a page break before the graphs
+    # elements.append(PageBreak())
 
     # Normalized Combined Equity Curve
     elements.append(Paragraph("Normalized Combined Equity Curve", styles['Heading2']))
     equity_curve_img = create_combined_equity_curve_plot()
-    elements.append(Image(equity_curve_img, width=8*inch, height=4*inch))
+    elements.append(Image(equity_curve_img, width=9*inch, height=4.5*inch))
     elements.append(Spacer(1, 0.25*inch))
 
     # Total Equity Curve
     elements.append(Paragraph("Total Equity Curve", styles['Heading2']))
     total_equity_curve_img = create_total_equity_curve_plot()
-    elements.append(Image(total_equity_curve_img, width=8*inch, height=4*inch))
+    elements.append(Image(total_equity_curve_img, width=9*inch, height=4.5*inch))
 
     doc.build(elements)
     print(f"Combined report exported to {filepath}")
