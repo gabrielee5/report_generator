@@ -17,6 +17,7 @@ from io import BytesIO
 from decimal import Decimal
 import logging
 import argparse
+from combined_report import generate_combined_report
 
 # TO DO
 # make the graphic of the report better
@@ -734,6 +735,7 @@ def main():
     # to change the day bare in mind: 0=monday, 6=sunday, ecc
     if datetime.datetime.now().weekday() == 6 or args.force_weekly:
         generate_weekly_report()
+        generate_combined_report()
 
 
 if __name__ == "__main__":
