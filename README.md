@@ -11,3 +11,9 @@ The file test.env is a template for the structure of the .env file.
 The file backup_4.py run perfectly and is meant to generate a daily report when activated; also it stores daily data in a database and it creates a log file.
 The other backup files are previous versions, so they are less sophisticated.
 
+## File .env
+The structure of the .env file should be this:
+
+    001_api_key = "abc"
+    001_api_secret = "xyz"
+    001_name = "account1"
