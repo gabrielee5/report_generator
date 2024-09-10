@@ -13,6 +13,8 @@ import numpy as np
 import logging
 from functools import wraps
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # Set up logging
 logging.basicConfig(filename='trading_report.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
