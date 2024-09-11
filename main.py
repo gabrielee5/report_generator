@@ -588,9 +588,9 @@ def export_report_to_pdf(report_data):
     weekly_comparison_data = [
         ["Metric", "Value"],
         ["Previous Week Equity", f"{report_data['previous_week_equity_usdt']:.2f} USDT" if report_data['previous_week_equity_usdt'] is not None else "N/A"],
-        ["Equity Difference", f"{report_data['equity_difference_usdt']:.2f} USDT" if report_data['equity_difference_usdt'] is not None else "N/A"],
-        ["Previous Week Equity (BTC)", f"{report_data['previous_week_equity_btc']:.2f} USDT" if report_data['previous_week_equity_btc'] is not None else "N/A"],
-        ["Equity Difference (BTC)", f"{report_data['equity_difference_btc']:.2f} USDT" if report_data['equity_difference_btc'] is not None else "N/A"],
+        ["Equity Difference", f"{report_data['equity_difference_usdt']:.2f} %" if report_data['equity_difference_usdt'] is not None else "N/A"],
+        ["Previous Week Equity (BTC)", f"{report_data['previous_week_equity_btc']:.6f} BTC" if report_data['previous_week_equity_btc'] is not None else "N/A"],
+        ["Equity Difference (BTC)", f"{report_data['equity_difference_btc']:.2f} %" if report_data['equity_difference_btc'] is not None else "N/A"],
     ]
     weekly_comparison_table = Table(weekly_comparison_data, colWidths=[3*inch, 2*inch])
     weekly_comparison_table.setStyle(TableStyle([
