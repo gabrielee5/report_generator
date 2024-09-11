@@ -230,37 +230,47 @@ def get_weekly_performance():
     return performance
 
 @log_errors
-def get_performance(days=1):
+def get_performance(x_days):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     accounts = get_all_accounts()
     
     today = datetime.date.today()
-    start_date = today - datetime.timedelta(days=days)
+    start_date = today - datetime.timedelta(days=x_days)
     
     performance = {}
     
     for account in accounts:
-        cursor.execute("""
-            SELECT date, equity
-            FROM daily_reports 
-            WHERE account_name = ? AND date IN (?, ?)
-            ORDER BY date ASC
-        """, (account, start_date.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
-        
-        results = cursor.fetchall()
-        if len(results) == 2:
-            start_date, start_equity = results[0]
-            end_date, end_equity = results[1]
-            percent_change = ((end_equity - start_equity) / start_equity) * 100
-            performance[account] = {
-                'start_date': start_date,
-                'end_date': end_date,
-                'start_equity': start_equity,
-                'end_equity': end_equity,
-                'percent_change': percent_change
-            }
-        else:
+        try:
+            cursor.execute("""
+                SELECT date, equity
+                FROM daily_reports 
+                WHERE account_name = ? AND date BETWEEN ? AND ?
+                ORDER BY date ASC
+            """, (account, start_date.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')))
+            
+            results = cursor.fetchall()
+            if len(results) >= 2:
+                start_date_str, start_equity = results[0]
+                end_date_str, end_equity = results[-1]
+                
+                # Convert date strings to datetime objects
+                start_date = datetime.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                
+                percent_change = ((end_equity - start_equity) / start_equity) * 100
+                performance[account] = {
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'start_equity': start_equity,
+                    'end_equity': end_equity,
+                    'percent_change': percent_change
+                }
+            else:
+                logging.warning(f"Insufficient data for account {account} in the date range")
+                performance[account] = None
+        except Exception as e:
+            logging.error(f"Error processing performance data for account {account}: {str(e)}")
             performance[account] = None
     
     conn.close()
@@ -434,146 +444,146 @@ def generate_combined_report(x_day=7):
 
 @log_errors
 def daily_combined_report(x_day=1):
-    x_day_fees_and_volumes = get_x_day_fees_and_volumes(x_day)
-    latest_data = get_latest_data_for_accounts()
-    performance = get_performance(x_day)
-    
-    reports_dir = 'reports'
-    os.makedirs(reports_dir, exist_ok=True)
-
-    account_dir = os.path.join(reports_dir, 'total')
-    os.makedirs(account_dir, exist_ok=True)
-
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    filename = f"daily_combined_{today}.pdf"
-    filepath = os.path.join(account_dir, filename)
-
-    doc = SimpleDocTemplate(filepath, pagesize=landscape(letter),
-                            rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=18)
-
-    elements = []
-    styles = getSampleStyleSheet()
-
-    styles.add(ParagraphStyle(name='CenteredHeading1', parent=styles['Heading1'], alignment=TA_CENTER))
-
-    elements.append(Paragraph(f"Daily Combined Report - {today}", styles['CenteredHeading1']))
-    elements.append(Spacer(1, 0.5*inch))
-
-    account_summary_data = [["Account", "Equity (USDT)", "Long Positions", "Short Positions", "N. Trades", "Net Exposure"]]
-    total_equity_usdt = 0
-    total_long_positions = 0
-    total_short_positions = 0
-    total_trades_today = 0
-    total_net_exposure = 0
-
-    for account, data in latest_data.items():
-        account_summary_data.append([
-            account,
-            f"{data['equity']:.2f}",
-            str(data['long_positions']),
-            str(data['short_positions']),
-            int(data['trades_today']),
-            f"{data['net_exposure']:.2f}"
-        ])
-        total_equity_usdt += data['equity']
-        total_long_positions += data['long_positions']
-        total_short_positions += data['short_positions']
-        total_trades_today += data['trades_today']
-        total_net_exposure += data['net_exposure']
-
-    account_summary_data.append([
-        "Total",
-        f"{total_equity_usdt:.2f}",
-        str(total_long_positions),
-        str(total_short_positions),
-        int(total_trades_today),
-        f"{total_net_exposure:.2f}"
-    ])
-
-    elements.extend(create_table(account_summary_data, "Account Summary", styles))
-
-    fees_volumes_data = [["Account", "Funding Fees", "Trading Fees", "Total Fees", "Total Volume"]]
-    total_funding_fees = 0
-    total_trading_fees = 0
-    total_fees = 0
-    total_volume = 0
-
-    for account, data in x_day_fees_and_volumes.items():
-        fees_volumes_data.append([
-            account,
-            f"{data['funding_fees']:.2f}",
-            f"{data['trading_fees']:.2f}",
-            f"{data['total_fees']:.2f}",
-            f"{data['total_volume']:.2f}"
-        ])
-        total_funding_fees += data['funding_fees']
-        total_trading_fees += data['trading_fees']
-        total_fees += data['total_fees']
-        total_volume += data['total_volume']
-
-    fees_volumes_data.append([
-        "Total",
-        f"{total_funding_fees:.2f}",
-        f"{total_trading_fees:.2f}",
-        f"{total_fees:.2f}",
-        f"{total_volume:.2f}"
-    ])
-
-    elements.extend(create_table(fees_volumes_data, f"{x_day}-Day Fees and Volumes", styles))
-
-    performance_data = [["Account", "Start Equity", "End Equity", "Performance", "Weight"]]
-    total_start_equity = 0
-    total_end_equity = 0
-    total_weighted_performance = 0
-
-    for account, data in performance.items():
-        if data is not None:
-            weight = data['start_equity'] / sum(d['start_equity'] for d in performance.values() if d is not None)
-            performance_data.append([
-                account,
-                f"{data['start_equity']:.2f}",
-                f"{data['end_equity']:.2f}",
-                f"{data['percent_change']:.2f}%",
-                f"{weight:.2%}"
-            ])
-            total_start_equity += data['start_equity']
-            total_end_equity += data['end_equity']
-            total_weighted_performance += data['percent_change'] * weight
-
-    if total_start_equity > 0:
-        total_performance = ((total_end_equity - total_start_equity) / total_start_equity) * 100
-        performance_data.append([
-            "Total",
-            f"{total_start_equity:.2f}",
-            f"{total_end_equity:.2f}",
-            f"{total_performance:.2f}%",
-            "100.00%"
-        ])
-        performance_data.append([
-            "Weighted Average",
-            "",
-            "",
-            f"{total_weighted_performance:.2f}%",
-            ""
-        ])
-    else:
-        performance_data.extend([
-            ["Total", "N/A", "N/A", "N/A", "N/A"],
-            ["Weighted Average", "", "", "N/A", ""]
-        ])
-
-    elements.extend(create_table(performance_data, "Yesterday's Performance", styles))
-
-    elements.append(Paragraph("Normalized Combined Equity Curve", styles['Heading2']))
-    equity_curve_img = create_combined_equity_curve_plot()
-    elements.append(Image(equity_curve_img, width=9*inch, height=4.5*inch))
-    elements.append(Spacer(1, 0.25*inch))
-
-    elements.append(Paragraph("Total Equity Curve", styles['Heading2']))
-    total_equity_curve_img = create_total_equity_curve_plot()
-    elements.append(Image(total_equity_curve_img, width=9*inch, height=4.5*inch))
-
     try:
+        x_day_fees_and_volumes = get_x_day_fees_and_volumes(x_day)
+        latest_data = get_latest_data_for_accounts()
+        performance = get_performance(x_day)
+        
+        reports_dir = 'reports'
+        os.makedirs(reports_dir, exist_ok=True)
+
+        account_dir = os.path.join(reports_dir, 'total')
+        os.makedirs(account_dir, exist_ok=True)
+
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        filename = f"daily_combined_{today}.pdf"
+        filepath = os.path.join(account_dir, filename)
+
+        doc = SimpleDocTemplate(filepath, pagesize=landscape(letter),
+                                rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=18)
+
+        elements = []
+        styles = getSampleStyleSheet()
+
+        styles.add(ParagraphStyle(name='CenteredHeading1', parent=styles['Heading1'], alignment=TA_CENTER))
+
+        elements.append(Paragraph(f"Daily Combined Report - {today}", styles['CenteredHeading1']))
+        elements.append(Spacer(1, 0.5*inch))
+
+        account_summary_data = [["Account", "Equity (USDT)", "Long Positions", "Short Positions", "N. Trades", "Net Exposure"]]
+        total_equity_usdt = 0
+        total_long_positions = 0
+        total_short_positions = 0
+        total_trades_today = 0
+        total_net_exposure = 0
+
+        for account, data in latest_data.items():
+            account_summary_data.append([
+                account,
+                f"{data['equity']:.2f}",
+                str(data['long_positions']),
+                str(data['short_positions']),
+                int(data['trades_today']),
+                f"{data['net_exposure']:.2f}"
+            ])
+            total_equity_usdt += data['equity']
+            total_long_positions += data['long_positions']
+            total_short_positions += data['short_positions']
+            total_trades_today += data['trades_today']
+            total_net_exposure += data['net_exposure']
+
+        account_summary_data.append([
+            "Total",
+            f"{total_equity_usdt:.2f}",
+            str(total_long_positions),
+            str(total_short_positions),
+            int(total_trades_today),
+            f"{total_net_exposure:.2f}"
+        ])
+
+        elements.extend(create_table(account_summary_data, "Account Summary", styles))
+
+        fees_volumes_data = [["Account", "Funding Fees", "Trading Fees", "Total Fees", "Total Volume"]]
+        total_funding_fees = 0
+        total_trading_fees = 0
+        total_fees = 0
+        total_volume = 0
+
+        for account, data in x_day_fees_and_volumes.items():
+            fees_volumes_data.append([
+                account,
+                f"{data['funding_fees']:.2f}",
+                f"{data['trading_fees']:.2f}",
+                f"{data['total_fees']:.2f}",
+                f"{data['total_volume']:.2f}"
+            ])
+            total_funding_fees += data['funding_fees']
+            total_trading_fees += data['trading_fees']
+            total_fees += data['total_fees']
+            total_volume += data['total_volume']
+
+        fees_volumes_data.append([
+            "Total",
+            f"{total_funding_fees:.2f}",
+            f"{total_trading_fees:.2f}",
+            f"{total_fees:.2f}",
+            f"{total_volume:.2f}"
+        ])
+
+        elements.extend(create_table(fees_volumes_data, f"{x_day}-Day Fees and Volumes", styles))
+
+        performance_data = [["Account", "Start Equity", "End Equity", "Performance", "Weight"]]
+        total_start_equity = 0
+        total_end_equity = 0
+        total_weighted_performance = 0
+
+        for account, data in performance.items():
+            if data is not None:
+                weight = data['start_equity'] / sum(d['start_equity'] for d in performance.values() if d is not None)
+                performance_data.append([
+                    account,
+                    f"{data['start_equity']:.2f}",
+                    f"{data['end_equity']:.2f}",
+                    f"{data['percent_change']:.2f}%",
+                    f"{weight:.2%}"
+                ])
+                total_start_equity += data['start_equity']
+                total_end_equity += data['end_equity']
+                total_weighted_performance += data['percent_change'] * weight
+
+        if total_start_equity > 0:
+            total_performance = ((total_end_equity - total_start_equity) / total_start_equity) * 100
+            performance_data.append([
+                "Total",
+                f"{total_start_equity:.2f}",
+                f"{total_end_equity:.2f}",
+                f"{total_performance:.2f}%",
+                "100.00%"
+            ])
+            performance_data.append([
+                "Weighted Average",
+                "",
+                "",
+                f"{total_weighted_performance:.2f}%",
+                ""
+            ])
+        else:
+            performance_data.extend([
+                ["Total", "N/A", "N/A", "N/A", "N/A"],
+                ["Weighted Average", "", "", "N/A", ""]
+            ])
+
+        elements.extend(create_table(performance_data, "Yesterday's Performance", styles))
+
+        elements.append(Paragraph("Normalized Combined Equity Curve", styles['Heading2']))
+        equity_curve_img = create_combined_equity_curve_plot()
+        elements.append(Image(equity_curve_img, width=9*inch, height=4.5*inch))
+        elements.append(Spacer(1, 0.25*inch))
+
+        elements.append(Paragraph("Total Equity Curve", styles['Heading2']))
+        total_equity_curve_img = create_total_equity_curve_plot()
+        elements.append(Image(total_equity_curve_img, width=9*inch, height=4.5*inch))
+
         doc.build(elements)
         logging.info(f"Combined report exported to {filepath}")
         return filepath
