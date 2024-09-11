@@ -17,7 +17,7 @@ from io import BytesIO
 from decimal import Decimal
 import logging
 import argparse
-from combined_report import generate_combined_report
+from combined_report import generate_combined_report, daily_combined_report
 
 # TO DO
 # make the graphic of the report better
@@ -730,6 +730,7 @@ def main():
 
     # Always run daily data collection
     collect_daily_data()
+    daily_combined_report()
 
     # Check if it's Sunday (weekday() returns 6 for Sunday) or if --force-weekly flag is used
     # to change the day bare in mind: 0=monday, 6=sunday, ecc

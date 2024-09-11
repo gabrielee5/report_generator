@@ -98,6 +98,30 @@ def equity_btc(session, equity_usdt):
     last_price_btc = float(response["result"]["list"][0]["lastPrice"])
     return equity_usdt / last_price_btc
 
-print(equity_btc(session, 10000))
+# print(equity_btc(session, 10000))
+
+withdrawal = session.get_withdrawal_records(
+    coin="USDT",
+    withdrawType=2,
+    limit=10,
+)
+
+deposit = session.get_internal_deposit_records(
+    # startTime=1724168100000,
+    # endTime=1725982560000,
+)
+
+transfer = session.get_internal_transfer_records(
+    coin="USDT",
+    limit=3,
+)
+
+deposit2 = session.get_deposit_records(
+    coin="USDT",
+)
+
+# print(transfer)
+print(deposit2)
+# print(withdrawal)
 
 
