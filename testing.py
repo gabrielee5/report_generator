@@ -3,6 +3,8 @@ from dotenv import dotenv_values
 import datetime
 from decimal import Decimal
 from main import parse_executions
+import json
+
 
 # Load environment variables
 secrets = dotenv_values(".env")
@@ -74,11 +76,12 @@ def process_fees(data, current_date):
     }
 
 # Fetch executions
-response = session.get_executions(
+output = session.get_executions(
     category="linear",
     limit=100,
 )
-# print(response)
+
+# print(output)
 # print(get_all_trades_today(session))
 
 
@@ -100,6 +103,47 @@ def equity_btc(session, equity_usdt):
 
 # print(equity_btc(session, 10000))
 
+
+def filter_coin_data(data, coin_symbol):
+    # Check if data is already a dictionary
+    if isinstance(data, dict):
+        parsed_data = data
+    else:
+        try:
+            # If it's a string, try to parse it as JSON
+            parsed_data = json.loads(data)
+        except json.JSONDecodeError:
+            return "Error: Invalid data format. Expected a dictionary or valid JSON string."
+    
+    # Extract the list of trades
+    trades = parsed_data.get('result', {}).get('list', [])
+    
+    # Filter trades for the specified coin
+    filtered_trades = [trade for trade in trades if trade['symbol'] == coin_symbol]
+    
+    # If no trades found for the specified coin, return a message
+    if not filtered_trades:
+        return f"No trades found for {coin_symbol}"
+    
+    # Create a formatted output
+    output = f"Trades for {coin_symbol}:\n"
+    for trade in filtered_trades:
+        output += f"Time: {trade['execTime']}\n"
+        output += f"Side: {trade['side']}\n"
+        output += f"Price: {trade['execPrice']}\n"
+        output += f"Quantity: {trade['execQty']}\n"
+        output += f"Value: {trade['execValue']}\n"
+        output += f"Fee: {trade['execFee']}\n"
+        output += f"Type: {trade['execType']}\n"
+        output += "-" * 30 + "\n"
+    
+    return output
+
+# Example usage:
+result = filter_coin_data(output, "DARUSDT")
+print(result)
+
+'''
 withdrawal = session.get_withdrawal_records(
     coin="USDT",
     withdrawType=2,
@@ -119,9 +163,7 @@ transfer = session.get_internal_transfer_records(
 deposit2 = session.get_deposit_records(
     coin="USDT",
 )
-
+'''
 # print(transfer)
-print(deposit2)
+# print(deposit2)
 # print(withdrawal)
-
-
