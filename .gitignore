@@ -7,3 +7,6 @@ trading_report.log
 .DS_Store
 cron.log
 plots
+transactions.csv
+cex_connection.py
+risk_report.py
