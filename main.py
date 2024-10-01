@@ -591,6 +591,11 @@ def calculate_adjusted_returns(account_name, start_date=None, end_date=None):
     conn.close()
 
     if not rows:
+        logging.warning(f"No data found for account {account_name} in the specified date range.")
+        return []
+
+    if len(rows) < 2:
+        logging.warning(f"Insufficient data for account {account_name} in the date range. At least two data points are required.")
         return []
 
     # Process the data
@@ -600,7 +605,8 @@ def calculate_adjusted_returns(account_name, start_date=None, end_date=None):
     previous_adjusted_equity = None
 
     for date, equity, deposit, withdrawal in rows:
-        # Use 0 as default value if deposit or withdrawal is None
+        # Use 0 as default value if deposit, withdrawal, or equity is None
+        equity = equity or 0
         deposit = deposit or 0
         withdrawal = withdrawal or 0
         
@@ -622,6 +628,7 @@ def calculate_adjusted_returns(account_name, start_date=None, end_date=None):
 
         previous_adjusted_equity = adjusted_equity_value
 
+    logging.info(f"Processed {len(adjusted_equity)} data points for account {account_name}")
     return adjusted_equity
 
 # REPORT
@@ -644,6 +651,10 @@ def export_report_to_pdf(report_data):
     # Custom colors
     primary_color = HexColor("#2a5e35")
     secondary_color = HexColor("#E2E2E2")
+
+    # Convert HexColor to a format matplotlib can understand
+    primary_color_rgb = primary_color.rgb()
+    primary_color_matplotlib = (primary_color_rgb[0]/255, primary_color_rgb[1]/255, primary_color_rgb[2]/255)
 
     elements = []
     styles = getSampleStyleSheet()
@@ -808,17 +819,16 @@ def export_report_to_pdf(report_data):
     elements.append(weekly_comparison_table)
     elements.append(Paragraph("This isn't calculating the eventual deposit and withdrawals, so the metric is probably not accurate.", styles['Normal']))
 
-
     # Add new section for Adjusted Returns Performance Graph
     elements.append(Paragraph("7. Adjusted Returns Performance", styles['Heading2']))
     
     # Create the performance graph
-    if 'adjusted_returns' in report_data and report_data['adjusted_returns']:
+    if 'adjusted_returns' in report_data and len(report_data['adjusted_returns']) >= 2:
         plt.figure(figsize=(10, 5))
         dates = [datetime.datetime.strptime(data['date'], '%Y-%m-%d') for data in report_data['adjusted_returns']]
         adjusted_equity = [data['adjusted_equity'] for data in report_data['adjusted_returns']]
         
-        plt.plot(dates, adjusted_equity, marker='o', linestyle='-', color=primary_color)
+        plt.plot(dates, adjusted_equity, marker='o', linestyle='-', color=primary_color_matplotlib)
         plt.title('Adjusted Equity Performance')
         plt.xlabel('Date')
         plt.ylabel('Adjusted Equity (USDT)')
@@ -844,7 +854,7 @@ def export_report_to_pdf(report_data):
         elements.append(Spacer(1, 0.25*inch))
         elements.append(Paragraph("The graph above shows the performance of the account based on the adjusted equity, which takes into account deposits and withdrawals.", styles['Normal']))
         
-        # Optionally, add a table with some key metrics
+        # Add a table with some key metrics
         performance_data = [
             ["Metric", "Value"],
             ["Starting Adjusted Equity", f"{adjusted_equity[0]:.2f} USDT"],
@@ -871,7 +881,8 @@ def export_report_to_pdf(report_data):
         ]))
         elements.append(performance_table)
     else:
-        elements.append(Paragraph("No adjusted returns data available for this period.", styles['Normal']))
+        elements.append(Paragraph("Insufficient data available to generate the adjusted returns performance graph. This could be due to a lack of data points in the specified date range.", styles['Normal']))
+
 
     doc.build(elements)
     print(f"Report exported to {filepath}")
@@ -992,9 +1003,28 @@ def generate_weekly_report():
         
         for account in accounts:
             logging.info(f"Generating weekly report for {account['name']}...")
-            weekly_report_data = generate_report_for_account(account)  # Pass the entire account dictionary
-            pdf_path = export_report_to_pdf(weekly_report_data)
-            # send_email_with_attachment(account['name'], account['email'], pdf_path)
+            try:
+                weekly_report_data = generate_report_for_account(account)
+                
+                # Calculate adjusted returns for the past 28 days instead of 7
+                end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                start_date = (datetime.datetime.now() - datetime.timedelta(days=28)).strftime("%Y-%m-%d")
+                logging.info(f"Calculating adjusted returns for {account['name']} from {start_date} to {end_date}")
+                adjusted_returns = calculate_adjusted_returns(account['name'], start_date, end_date)
+                
+                if adjusted_returns:
+                    logging.info(f"Calculated {len(adjusted_returns)} adjusted return data points for {account['name']}")
+                else:
+                    logging.warning(f"No adjusted return data calculated for {account['name']}")
+                
+                weekly_report_data['adjusted_returns'] = adjusted_returns
+                
+                pdf_path = export_report_to_pdf(weekly_report_data)
+                logging.info(f"PDF report generated for {account['name']}: {pdf_path}")
+                # send_email_with_attachment(account['name'], account['email'], pdf_path)
+            except Exception as e:
+                logging.error(f"Error processing report for account {account['name']}: {str(e)}")
+                continue
             
         logging.info("Weekly reports generated and sent successfully.")
     except Exception as e:
