@@ -11,12 +11,14 @@ from reportlab.lib.colors import HexColor
 from reportlab.platypus import Image
 import sqlite3
 import os
+import csv
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from io import BytesIO
 from decimal import Decimal
 import logging
 import argparse
+import statistics
 from combined_report import generate_combined_report, daily_combined_report
 
 # TO DO
@@ -37,12 +39,13 @@ def get_accounts_from_env():
         
         for key in sorted_keys:
             if key.endswith('_api_key'):
-                account_prefix = key[:-8]
+                account_id = key[:-8]
                 accounts.append({
-                    "name": env_vars.get(f"{account_prefix}_name", f"Account {account_prefix}"),
-                    "api_key": env_vars[f"{account_prefix}_api_key"],
-                    "api_secret": env_vars[f"{account_prefix}_api_secret"],
-                    "email": env_vars.get(f"{account_prefix}_email", "")  # Add email, default to empty string if not found
+                    "id": account_id,
+                    "name": env_vars.get(f"{account_id}_name", f"Account {account_id}"),
+                    "api_key": env_vars[f"{account_id}_api_key"],
+                    "api_secret": env_vars[f"{account_id}_api_secret"],
+                    "email": env_vars.get(f"{account_id}_email", "")  # Add email, default to empty string if not found
                 })
         
         if not accounts:
@@ -76,9 +79,20 @@ def initialize_database():
             trading_fees REAL,
             total_fees REAL,
             total_volume REAL,
+            deposit REAL DEFAULT 0,
+            withdrawal REAL DEFAULT 0,
             PRIMARY KEY (date, account_name)
         )
         ''')
+
+        # Add new columns if they don't exist
+        cursor.execute("PRAGMA table_info(daily_reports)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'deposit' not in columns:
+            cursor.execute("ALTER TABLE daily_reports ADD COLUMN deposit REAL DEFAULT 0")
+        if 'withdrawal' not in columns:
+            cursor.execute("ALTER TABLE daily_reports ADD COLUMN withdrawal REAL DEFAULT 0")
 
         conn.commit()
     except sqlite3.Error as e:
@@ -97,28 +111,67 @@ def store_daily_report(report_data):
             if isinstance(value, Decimal):
                 report_data[key] = float(value)
 
+        # Check for existing record
         cursor.execute('''
-        INSERT OR REPLACE INTO daily_reports 
-        (date, account_name, equity, equity_btc, open_positions, trades_today, long_positions, short_positions, 
-        long_exposure, short_exposure, net_exposure, funding_fees, trading_fees, total_fees, total_volume)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            report_data['date'],
-            report_data['account_name'],
-            report_data['equity'],
-            report_data['equity_btc'],
-            len(report_data['open_positions']),
-            report_data['trades_today'],
-            report_data['long_positions'],
-            report_data['short_positions'],
-            report_data['long_exposure'],
-            report_data['short_exposure'],
-            report_data['overall_exposure'],
-            report_data['funding_fees'],
-            report_data['trading_fees'],
-            report_data['total_fees'],
-            report_data['total_volume']
-        ))
+        SELECT deposit, withdrawal FROM daily_reports
+        WHERE date = ? AND account_name = ?
+        ''', (report_data['date'], report_data['account_name']))
+        existing_data = cursor.fetchone()
+
+        if existing_data:
+            # Update existing record, preserving deposit and withdrawal
+            cursor.execute('''
+            UPDATE daily_reports 
+            SET equity = ?, equity_btc = ?, open_positions = ?, trades_today = ?, 
+                long_positions = ?, short_positions = ?, long_exposure = ?, 
+                short_exposure = ?, net_exposure = ?, funding_fees = ?, 
+                trading_fees = ?, total_fees = ?, total_volume = ?
+            WHERE date = ? AND account_name = ?
+            ''', (
+                report_data['equity'],
+                report_data['equity_btc'],
+                len(report_data['open_positions']),
+                report_data['trades_today'],
+                report_data['long_positions'],
+                report_data['short_positions'],
+                report_data['long_exposure'],
+                report_data['short_exposure'],
+                report_data['overall_exposure'],
+                report_data['funding_fees'],
+                report_data['trading_fees'],
+                report_data['total_fees'],
+                report_data['total_volume'],
+                report_data['date'],
+                report_data['account_name']
+            ))
+        else:
+            # Insert new record
+            cursor.execute('''
+            INSERT INTO daily_reports 
+            (date, account_name, equity, equity_btc, open_positions, trades_today, 
+            long_positions, short_positions, long_exposure, short_exposure, 
+            net_exposure, funding_fees, trading_fees, total_fees, total_volume, 
+            deposit, withdrawal)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                report_data['date'],
+                report_data['account_name'],
+                report_data['equity'],
+                report_data['equity_btc'],
+                len(report_data['open_positions']),
+                report_data['trades_today'],
+                report_data['long_positions'],
+                report_data['short_positions'],
+                report_data['long_exposure'],
+                report_data['short_exposure'],
+                report_data['overall_exposure'],
+                report_data['funding_fees'],
+                report_data['trading_fees'],
+                report_data['total_fees'],
+                report_data['total_volume'],
+                report_data.get('deposit', 0),
+                report_data.get('withdrawal', 0)
+            ))
         
         conn.commit()
     except sqlite3.Error as e:
@@ -429,6 +482,148 @@ def get_last_x_days_metrics(account_name, x_days=7):
         'volume': volume
     }
 
+def parse_date(date_string):
+    from datetime import datetime
+    return datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S')
+
+def process_transactions_csv():
+    conn = None
+    try:
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+        
+        with open('transactions.csv', 'r') as csvfile:
+            csvreader = csv.DictReader(csvfile)
+            for row in csvreader:
+                timestamp = parse_date(row['Timestamp'])
+                date = timestamp.strftime('%Y-%m-%d')
+                account_name = row['Account Name']
+                amount = float(row['Amount'])
+                transaction_type = row['Type'].lower()
+
+                logging.info(f"Processing transaction: {date}, {account_name}, {amount}, {transaction_type}")
+
+                # Check if there's an existing record for this date and account
+                cursor.execute('''
+                SELECT * FROM daily_reports
+                WHERE date = ? AND account_name = ?
+                ''', (date, account_name))
+                existing_record = cursor.fetchone()
+
+                if existing_record:
+                    # Update existing record
+                    if transaction_type == 'deposit':
+                        cursor.execute('''
+                        UPDATE daily_reports
+                        SET deposit = deposit + ?
+                        WHERE date = ? AND account_name = ?
+                        ''', (amount, date, account_name))
+                    elif transaction_type == 'withdrawal':
+                        cursor.execute('''
+                        UPDATE daily_reports
+                        SET withdrawal = withdrawal + ?
+                        WHERE date = ? AND account_name = ?
+                        ''', (amount, date, account_name))
+                else:
+                    # Insert new record
+                    if transaction_type == 'deposit':
+                        cursor.execute('''
+                        INSERT INTO daily_reports (date, account_name, deposit, withdrawal)
+                        VALUES (?, ?, ?, 0)
+                        ''', (date, account_name, amount, 0))
+                    elif transaction_type == 'withdrawal':
+                        cursor.execute('''
+                        INSERT INTO daily_reports (date, account_name, deposit, withdrawal)
+                        VALUES (?, ?, 0, ?)
+                        ''', (date, account_name, 0, amount))
+
+                # Log the number of rows affected
+                rows_affected = cursor.rowcount
+                logging.info(f"Rows affected: {rows_affected}")
+
+                # Verify the data was written
+                cursor.execute('''
+                SELECT deposit, withdrawal FROM daily_reports
+                WHERE date = ? AND account_name = ?
+                ''', (date, account_name))
+                result = cursor.fetchone()
+                if result:
+                    logging.info(f"After operation - Deposit: {result[0]}, Withdrawal: {result[1]}")
+                else:
+                    logging.warning(f"No data found after operation for {date}, {account_name}")
+
+        conn.commit()
+        logging.info("All transactions processed and committed to database.")
+        print("Transactions processed successfully.")
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"Error processing transactions CSV: {str(e)}")
+        print(f"An error occurred while processing transactions. Please check the log file for details.")
+    finally:
+        if conn:
+            conn.close()
+
+def calculate_adjusted_returns(account_name, start_date=None, end_date=None):
+    conn = sqlite3.connect('database.db')
+    cursor = conn.cursor()
+
+    # Construct the date range condition
+    date_condition = ""
+    params = [account_name]
+    if start_date:
+        date_condition += " AND date >= ?"
+        params.append(start_date)
+    if end_date:
+        date_condition += " AND date <= ?"
+        params.append(end_date)
+
+    # Fetch the data from the database
+    query = f'''
+    SELECT date, equity, deposit, withdrawal
+    FROM daily_reports
+    WHERE account_name = ?{date_condition}
+    ORDER BY date
+    '''
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return []
+
+    # Process the data
+    adjusted_equity = []
+    cumulative_deposit = 0
+    cumulative_withdrawal = 0
+    previous_adjusted_equity = None
+
+    for date, equity, deposit, withdrawal in rows:
+        # Use 0 as default value if deposit or withdrawal is None
+        deposit = deposit or 0
+        withdrawal = withdrawal or 0
+        
+        cumulative_deposit += deposit
+        cumulative_withdrawal += withdrawal
+        adjusted_equity_value = equity - (cumulative_deposit - cumulative_withdrawal)
+
+        if previous_adjusted_equity is not None:
+            daily_return = (adjusted_equity_value / previous_adjusted_equity) - 1
+        else:
+            daily_return = 0
+
+        adjusted_equity.append({
+            'date': date,
+            'equity': equity,
+            'adjusted_equity': adjusted_equity_value,
+            'daily_return': daily_return
+        })
+
+        previous_adjusted_equity = adjusted_equity_value
+
+    return adjusted_equity
+
 # REPORT
 def export_report_to_pdf(report_data):
     # Create 'reports' directory if it doesn't exist
@@ -552,6 +747,7 @@ def export_report_to_pdf(report_data):
     elements.append(Paragraph("4. Equity Curve", styles['Heading2']))
     equity_curve_img = create_equity_curve_plot(report_data['account_name'])
     elements.append(Image(equity_curve_img, width=8*inch, height=4*inch))
+    elements.append(Paragraph("This includes deposit and withdrawals.", styles['Normal']))
 
     # Metrics section
     elements.append(Paragraph("5. Weekly Metrics", styles['Heading2']))
@@ -610,6 +806,72 @@ def export_report_to_pdf(report_data):
         ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     elements.append(weekly_comparison_table)
+    elements.append(Paragraph("This isn't calculating the eventual deposit and withdrawals, so the metric is probably not accurate.", styles['Normal']))
+
+
+    # Add new section for Adjusted Returns Performance Graph
+    elements.append(Paragraph("7. Adjusted Returns Performance", styles['Heading2']))
+    
+    # Create the performance graph
+    if 'adjusted_returns' in report_data and report_data['adjusted_returns']:
+        plt.figure(figsize=(10, 5))
+        dates = [datetime.datetime.strptime(data['date'], '%Y-%m-%d') for data in report_data['adjusted_returns']]
+        adjusted_equity = [data['adjusted_equity'] for data in report_data['adjusted_returns']]
+        
+        plt.plot(dates, adjusted_equity, marker='o', linestyle='-', color=primary_color)
+        plt.title('Adjusted Equity Performance')
+        plt.xlabel('Date')
+        plt.ylabel('Adjusted Equity (USDT)')
+        plt.grid(True)
+        
+        # Format x-axis to show dates nicely
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        plt.gcf().autofmt_xdate()  # Rotate and align the tick labels
+        
+        # Save plot to a BytesIO object
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+        img_buffer.seek(0)
+        plt.close()
+        
+        # Add the image to the PDF
+        img = Image(img_buffer)
+        img.drawHeight = 4*inch
+        img.drawWidth = 7*inch
+        elements.append(img)
+        
+        # Add a brief explanation
+        elements.append(Spacer(1, 0.25*inch))
+        elements.append(Paragraph("The graph above shows the performance of the account based on the adjusted equity, which takes into account deposits and withdrawals.", styles['Normal']))
+        
+        # Optionally, add a table with some key metrics
+        performance_data = [
+            ["Metric", "Value"],
+            ["Starting Adjusted Equity", f"{adjusted_equity[0]:.2f} USDT"],
+            ["Ending Adjusted Equity", f"{adjusted_equity[-1]:.2f} USDT"],
+            ["Total Return", f"{((adjusted_equity[-1] / adjusted_equity[0]) - 1) * 100:.2f}%"],
+            ["Avg Daily Return", f"{statistics.mean([data['daily_return'] for data in report_data['adjusted_returns']]) * 100:.2f}%"]
+        ]
+        performance_table = Table(performance_data, colWidths=[3*inch, 2*inch])
+        performance_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), secondary_color),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        elements.append(performance_table)
+    else:
+        elements.append(Paragraph("No adjusted returns data available for this period.", styles['Normal']))
 
     doc.build(elements)
     print(f"Report exported to {filepath}")
@@ -632,6 +894,7 @@ def generate_report_for_account(account):
         exposure_data = calculate_exposures_and_ratios(open_positions)
         fees = process_fees_and_volume(session)
         equity_in_btc = equity_btc(session, equity)
+        adjusted_returns = calculate_adjusted_returns(account["name"])
 
         previous_week_equity = get_previous_week_equity(account["name"])
         if previous_week_equity:
@@ -642,6 +905,19 @@ def generate_report_for_account(account):
             equity_difference_btc = None
 
         metrics = get_last_x_days_metrics(account["name"], x_days)
+
+        # Fetch existing deposit and withdrawal data
+        conn = sqlite3.connect('database.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+        SELECT deposit, withdrawal FROM daily_reports
+        WHERE date = ? AND account_name = ?
+        ''', (today, account["name"]))
+        existing_data = cursor.fetchone()
+        conn.close()
+
+        deposit = existing_data[0] if existing_data else 0
+        withdrawal = existing_data[1] if existing_data else 0
 
         report_data = {
             "account_name": account["name"],
@@ -682,6 +958,9 @@ def generate_report_for_account(account):
             "last_x_days_total_fees": metrics['total_fees'],
             "last_x_days_trades": metrics['trades'],
             "last_x_days_volume": metrics['volume'],
+            "deposit": deposit,
+            "withdrawal": withdrawal,
+            "adj_returns": adjusted_returns,
         }
         
         store_daily_report(report_data)
@@ -701,7 +980,7 @@ def collect_daily_data():
             logging.info(f"Collecting daily data for {account['name']}...")
             report_data = generate_report_for_account(account)
             store_daily_report(report_data)
-            
+
         logging.info("Daily data collection completed successfully.")
     except Exception as e:
         logging.error(f"Error in daily data collection: {str(e)}")
@@ -728,6 +1007,9 @@ def main():
     parser.add_argument('--force-weekly', action='store_true', help='Force generate weekly report')
     args = parser.parse_args()
 
+    # Process transactions from CSV
+    process_transactions_csv()
+    
     # Always run daily data collection
     collect_daily_data()
     daily_combined_report()
