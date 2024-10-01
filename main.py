@@ -503,39 +503,42 @@ def process_transactions_csv():
 
                 logging.info(f"Processing transaction: {date}, {account_name}, {amount}, {transaction_type}")
 
-                # Check if there's an existing record for this date and account
+                # Check if there's an existing record for this date, account, and transaction type
                 cursor.execute('''
-                SELECT * FROM daily_reports
+                SELECT deposit, withdrawal FROM daily_reports
                 WHERE date = ? AND account_name = ?
                 ''', (date, account_name))
                 existing_record = cursor.fetchone()
 
                 if existing_record:
-                    # Update existing record
-                    if transaction_type == 'deposit':
+                    existing_deposit, existing_withdrawal = existing_record
+                    if transaction_type == 'deposit' and existing_deposit != amount:
                         cursor.execute('''
                         UPDATE daily_reports
-                        SET deposit = deposit + ?
+                        SET deposit = ?
                         WHERE date = ? AND account_name = ?
                         ''', (amount, date, account_name))
-                    elif transaction_type == 'withdrawal':
+                    elif transaction_type == 'withdrawal' and existing_withdrawal != amount:
                         cursor.execute('''
                         UPDATE daily_reports
-                        SET withdrawal = withdrawal + ?
+                        SET withdrawal = ?
                         WHERE date = ? AND account_name = ?
                         ''', (amount, date, account_name))
+                    else:
+                        logging.info(f"Transaction already exists: {date}, {account_name}, {amount}, {transaction_type}")
+                        continue
                 else:
                     # Insert new record
                     if transaction_type == 'deposit':
                         cursor.execute('''
                         INSERT INTO daily_reports (date, account_name, deposit, withdrawal)
                         VALUES (?, ?, ?, 0)
-                        ''', (date, account_name, amount, 0))
+                        ''', (date, account_name, amount))
                     elif transaction_type == 'withdrawal':
                         cursor.execute('''
                         INSERT INTO daily_reports (date, account_name, deposit, withdrawal)
                         VALUES (?, ?, 0, ?)
-                        ''', (date, account_name, 0, amount))
+                        ''', (date, account_name, amount))
 
                 # Log the number of rows affected
                 rows_affected = cursor.rowcount
@@ -826,17 +829,25 @@ def export_report_to_pdf(report_data):
     if 'adjusted_returns' in report_data and len(report_data['adjusted_returns']) >= 2:
         plt.figure(figsize=(10, 5))
         dates = [datetime.datetime.strptime(data['date'], '%Y-%m-%d') for data in report_data['adjusted_returns']]
-        adjusted_equity = [data['adjusted_equity'] for data in report_data['adjusted_returns']]
+        daily_returns = [data['daily_return'] for data in report_data['adjusted_returns']]
         
-        plt.plot(dates, adjusted_equity, marker='o', linestyle='-', color=primary_color_matplotlib)
-        plt.title('Adjusted Equity Performance')
+        # Calculate normalized cumulative returns
+        normalized_returns = [100]
+        for daily_return in daily_returns[1:]:  # Skip the first day as it's the baseline
+            normalized_returns.append(normalized_returns[-1] * (1 + daily_return))
+        
+        plt.plot(dates, normalized_returns, marker='o', linestyle='-', color=primary_color_matplotlib)
+        plt.title('Normalized Adjusted Returns Performance')
         plt.xlabel('Date')
-        plt.ylabel('Adjusted Equity (USDT)')
+        plt.ylabel('Normalized Returns (Starting at 100)')
         plt.grid(True)
         
         # Format x-axis to show dates nicely
         plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
         plt.gcf().autofmt_xdate()  # Rotate and align the tick labels
+        
+        # Add horizontal line at y=100 to show the starting point
+        plt.axhline(y=100, color='r', linestyle='--', alpha=0.5)
         
         # Save plot to a BytesIO object
         img_buffer = BytesIO()
@@ -852,15 +863,17 @@ def export_report_to_pdf(report_data):
         
         # Add a brief explanation
         elements.append(Spacer(1, 0.25*inch))
-        elements.append(Paragraph("The graph above shows the performance of the account based on the adjusted equity, which takes into account deposits and withdrawals.", styles['Normal']))
+        elements.append(Paragraph("The graph above shows the normalized performance of the account based on the adjusted returns. The starting value is set to 100, and subsequent values represent the cumulative growth or decline of the initial investment.", styles['Normal']))
         
         # Add a table with some key metrics
+        total_return = (normalized_returns[-1] / 100 - 1) * 100  # Percentage change from 100
+        avg_daily_return = statistics.mean(daily_returns) * 100
         performance_data = [
             ["Metric", "Value"],
-            ["Starting Adjusted Equity", f"{adjusted_equity[0]:.2f} USDT"],
-            ["Ending Adjusted Equity", f"{adjusted_equity[-1]:.2f} USDT"],
-            ["Total Return", f"{((adjusted_equity[-1] / adjusted_equity[0]) - 1) * 100:.2f}%"],
-            ["Avg Daily Return", f"{statistics.mean([data['daily_return'] for data in report_data['adjusted_returns']]) * 100:.2f}%"]
+            ["Starting Value", "100"],
+            ["Ending Value", f"{normalized_returns[-1]:.2f}"],
+            ["Total Return", f"{total_return:.2f}%"],
+            ["Avg Daily Return", f"{avg_daily_return:.2f}%"]
         ]
         performance_table = Table(performance_data, colWidths=[3*inch, 2*inch])
         performance_table.setStyle(TableStyle([
@@ -882,7 +895,6 @@ def export_report_to_pdf(report_data):
         elements.append(performance_table)
     else:
         elements.append(Paragraph("Insufficient data available to generate the adjusted returns performance graph. This could be due to a lack of data points in the specified date range.", styles['Normal']))
-
 
     doc.build(elements)
     print(f"Report exported to {filepath}")
@@ -971,7 +983,7 @@ def generate_report_for_account(account):
             "last_x_days_volume": metrics['volume'],
             "deposit": deposit,
             "withdrawal": withdrawal,
-            "adj_returns": adjusted_returns,
+            "adjusted_returns": adjusted_returns,
         }
         
         store_daily_report(report_data)
