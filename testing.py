@@ -8,8 +8,8 @@ import json
 
 # Load environment variables
 secrets = dotenv_values(".env")
-api_key = secrets["001_api_key"]
-api_secret = secrets["001_api_secret"]
+api_key = secrets["003_api_key"]
+api_secret = secrets["003_api_secret"]
 
 # Initialize Bybit client
 session = HTTP(
@@ -75,23 +75,6 @@ def process_fees(data, current_date):
         'total_fees': round(funding_fees + trading_fees, 8)
     }
 
-# Fetch executions
-output = session.get_executions(
-    category="linear",
-    limit=100,
-)
-
-# print(output)
-# print(get_all_trades_today(session))
-
-
-'''
-# Display executions
-if response['retCode'] == 0:
-    display_executions(response['result']['list'])
-else:
-    print(f"Error: {response['retMsg']}")
-'''
 
 def equity_btc(session, equity_usdt):
     response = session.get_tickers(
@@ -139,31 +122,14 @@ def filter_coin_data(data, coin_symbol):
     
     return output
 
-# Example usage:
-result = filter_coin_data(output, "DARUSDT")
-print(result)
-
-'''
-withdrawal = session.get_withdrawal_records(
-    coin="USDT",
-    withdrawType=2,
-    limit=10,
+# Fetch executions
+output = session.get_executions(
+    category="linear",
+    limit=100,
 )
 
-deposit = session.get_internal_deposit_records(
-    # startTime=1724168100000,
-    # endTime=1725982560000,
-)
-
-transfer = session.get_internal_transfer_records(
-    coin="USDT",
-    limit=3,
-)
-
-deposit2 = session.get_deposit_records(
-    coin="USDT",
-)
-'''
-# print(transfer)
-# print(deposit2)
-# print(withdrawal)
+response = session.get_positions(
+            category="linear",
+            settleCoin="USDT"
+        )
+print(response)

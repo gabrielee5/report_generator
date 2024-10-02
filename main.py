@@ -56,6 +56,15 @@ def get_accounts_from_env():
         logging.error(f"Error reading accounts from .env: {str(e)}")
         raise
 
+def get_account_type(session):
+    try:
+        # Try to access unified account endpoint
+        session.get_wallet_balance(accountType="UNIFIED")
+        return "Unified"
+    except:
+        # If it fails, assume it's a standard account
+        return "Standard"
+    
 # DATABASE
 def initialize_database():
     try:
@@ -286,11 +295,18 @@ def determine_trade_action(trades, open_positions):
     return processed_trades
 
 def calculate_equity(session):
+    account_type = get_account_type(session)
     try:
-        response = session.get_wallet_balance(
-            accountType="CONTRACT",
-            coin="USDT"
-        )
+        if account_type == "Unified":
+            response = session.get_wallet_balance(
+                accountType="UNIFIED",
+                coin="USDT"
+            )
+        else:
+            response = session.get_wallet_balance(
+                accountType="CONTRACT",
+                coin="USDT"
+            )
         usdt_data = next((coin for coin in response["result"]["list"][0]["coin"] if coin["coin"] == "USDT"), None)
         if usdt_data:
             equity = float(usdt_data["equity"])
