@@ -770,14 +770,14 @@ def export_report_to_pdf(report_data):
         ]))
         elements.append(open_positions_table)
     else:
-        elements.append(Paragraph("No open positions.", styles['Normal']))
+        elements.append(Paragraph("\nNo open positions.\n", styles['Normal']))
     elements.append(Spacer(1, 0.25*inch))
 
     # Equity Curve
     elements.append(Paragraph("4. Equity Curve", styles['Heading2']))
     equity_curve_img = create_equity_curve_plot(report_data['account_name'])
     elements.append(Image(equity_curve_img, width=8*inch, height=4*inch))
-    elements.append(Paragraph("This includes deposit and withdrawals.", styles['Normal']))
+    elements.append(Paragraph("\nThis includes deposit and withdrawals.\n", styles['Normal']))
 
     # Metrics section
     elements.append(Paragraph("5. Weekly Metrics", styles['Heading2']))
@@ -807,7 +807,7 @@ def export_report_to_pdf(report_data):
         ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     elements.append(fees_table)
-    elements.append(Paragraph("When the fees are negative it means it is money received.", styles['Normal']))
+    elements.append(Paragraph("\nWhen the fees are negative it means it is money received.\n", styles['Normal']))
 
     # Add Weekly Comparison section
     elements.append(Paragraph("6. Weekly Comparison", styles['Heading2']))
@@ -836,7 +836,7 @@ def export_report_to_pdf(report_data):
         ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     elements.append(weekly_comparison_table)
-    elements.append(Paragraph("This isn't calculating the eventual deposit and withdrawals, so the metric is probably not accurate.", styles['Normal']))
+    elements.append(Paragraph("\nThis isn't calculating the eventual deposit and withdrawals, so the metric is probably not accurate.\n", styles['Normal']))
 
     # Add new section for Adjusted Returns Performance Graph
     elements.append(Paragraph("7. Adjusted Returns Performance", styles['Heading2']))
@@ -879,7 +879,7 @@ def export_report_to_pdf(report_data):
         
         # Add a brief explanation
         elements.append(Spacer(1, 0.25*inch))
-        elements.append(Paragraph("The graph above shows the normalized performance of the account based on the adjusted returns. The starting value is set to 100, and subsequent values represent the cumulative growth or decline of the initial investment.", styles['Normal']))
+        elements.append(Paragraph("\nThe graph above shows the normalized performance of the account based on the adjusted returns. The starting value is set to 100, and subsequent values represent the cumulative growth or decline of the initial investment.\n", styles['Normal']))
         
         # Add a table with some key metrics
         total_return = (normalized_returns[-1] / 100 - 1) * 100  # Percentage change from 100
@@ -910,7 +910,7 @@ def export_report_to_pdf(report_data):
         ]))
         elements.append(performance_table)
     else:
-        elements.append(Paragraph("Insufficient data available to generate the adjusted returns performance graph. This could be due to a lack of data points in the specified date range.", styles['Normal']))
+        elements.append(Paragraph("\nInsufficient data available to generate the adjusted returns performance graph. This could be due to a lack of data points in the specified date range.\n", styles['Normal']))
 
     doc.build(elements)
     print(f"Report exported to {filepath}")

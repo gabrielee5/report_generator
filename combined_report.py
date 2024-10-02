@@ -72,33 +72,100 @@ def get_latest_data_for_accounts():
     conn.close()
     return latest_data
 
-@log_errors
-def create_combined_equity_curve_plot(days=30):
+def calculate_adjusted_returns(account_name, start_date=None, end_date=None):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
+
+    # Construct the date range condition
+    date_condition = ""
+    params = [account_name]
+    if start_date:
+        date_condition += " AND date >= ?"
+        params.append(start_date)
+    if end_date:
+        date_condition += " AND date <= ?"
+        params.append(end_date)
+
+    # Fetch the data from the database
+    query = f'''
+    SELECT date, equity, deposit, withdrawal
+    FROM daily_reports
+    WHERE account_name = ?{date_condition}
+    ORDER BY date
+    '''
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        logging.warning(f"No data found for account {account_name} in the specified date range.")
+        return []
+
+    if len(rows) < 2:
+        logging.warning(f"Insufficient data for account {account_name} in the date range. At least two data points are required.")
+        return []
+
+    # Process the data
+    adjusted_equity = []
+    cumulative_deposit = 0
+    cumulative_withdrawal = 0
+    previous_adjusted_equity = None
+
+    for date, equity, deposit, withdrawal in rows:
+        # Use 0 as default value if deposit, withdrawal, or equity is None
+        equity = equity or 0
+        deposit = deposit or 0
+        withdrawal = withdrawal or 0
+        
+        cumulative_deposit += deposit
+        cumulative_withdrawal += withdrawal
+        adjusted_equity_value = equity - (cumulative_deposit - cumulative_withdrawal)
+
+        if previous_adjusted_equity is not None:
+            daily_return = (adjusted_equity_value / previous_adjusted_equity) - 1
+        else:
+            daily_return = 0
+
+        adjusted_equity.append({
+            'date': date,
+            'equity': equity,
+            'adjusted_equity': adjusted_equity_value,
+            'daily_return': daily_return
+        })
+
+        previous_adjusted_equity = adjusted_equity_value
+
+    logging.info(f"Processed {len(adjusted_equity)} data points for account {account_name}")
+    return adjusted_equity
+
+@log_errors
+def create_combined_equity_curve_plot(days: int = 30) -> BytesIO:
     accounts = get_all_accounts()
     
     plt.figure(figsize=(10, 5))
     
     for account in accounts:
-        query = '''
-        SELECT date, equity
-        FROM daily_reports
-        WHERE account_name = ?
-        ORDER BY date DESC
-        LIMIT ?
-        '''
-        cursor.execute(query, (account, days))
-        rows = cursor.fetchall()
-        dates, equity = zip(*[(datetime.datetime.strptime(row[0], '%Y-%m-%d'), row[1]) for row in reversed(rows)])
+        # Calculate the start date based on the number of days
+        end_date = datetime.date.today()
+        start_date = end_date - datetime.timedelta(days=days)
         
-        normalized_equity = [value / equity[0] * 100 for value in equity]
+        # Get adjusted returns for the account
+        adjusted_data = calculate_adjusted_returns(account, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
         
-        plt.plot(dates, normalized_equity, marker='o', label=account)
+        if adjusted_data:
+            dates = [datetime.datetime.strptime(data['date'], '%Y-%m-%d') for data in adjusted_data]
+            adjusted_equity = [data['adjusted_equity'] for data in adjusted_data]
+            
+            # Normalize the adjusted equity
+            initial_equity = adjusted_equity[0]
+            normalized_equity = [value / initial_equity * 100 for value in adjusted_equity]
+            
+            plt.plot(dates, normalized_equity, marker='o', label=account)
 
-    plt.title('Normalized Combined Equity Curve')
+    plt.title('Normalized Combined Adjusted Equity Curve')
     plt.xlabel('Date')
-    plt.ylabel('Normalized Equity (%)')
+    plt.ylabel('Normalized Adjusted Equity (%)')
     plt.legend()
     plt.grid(True)
     plt.gca().xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m-%d'))
@@ -111,7 +178,6 @@ def create_combined_equity_curve_plot(days=30):
     img_buffer.seek(0)
     plt.close()
 
-    conn.close()
     return img_buffer
 
 @log_errors
@@ -580,7 +646,7 @@ def daily_combined_report(x_day=1):
         elements.append(Image(equity_curve_img, width=9*inch, height=4.5*inch))
         elements.append(Spacer(1, 0.25*inch))
 
-        elements.append(Paragraph("Total Equity Curve", styles['Heading2']))
+        elements.append(Paragraph("Total Assets Under Management", styles['Heading2']))
         total_equity_curve_img = create_total_equity_curve_plot()
         elements.append(Image(total_equity_curve_img, width=9*inch, height=4.5*inch))
 
