@@ -1,12 +1,11 @@
 import csv
 from datetime import datetime
-from pybit.unified_trading import HTTP
 import os
-from dotenv import dotenv_values
+from pybit.unified_trading import HTTP
 import ccxt
+from dotenv import dotenv_values
 from main import get_accounts_from_env
 
-# File to store deposit/withdrawal data
 TRANSACTIONS_FILE = "transactions.csv"
 
 def choose_account(accounts):
@@ -21,11 +20,37 @@ def choose_account(accounts):
         else:
             print("Invalid account ID. Please try again.")
 
+def get_transaction_date():
+    while True:
+        date_str = input("Enter transaction date (YYYY-MM-DD): ")
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            return date.strftime("%Y-%m-%d")
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD format.")
+
+def sort_transactions():
+    transactions = []
+    with open(TRANSACTIONS_FILE, mode='r', newline='') as file:
+        reader = csv.reader(file)
+        header = next(reader)
+        transactions = list(reader)
+    
+    # Sort by timestamp
+    sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x[0], "%Y-%m-%d"))
+    
+    # Write back sorted transactions
+    with open(TRANSACTIONS_FILE, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(header)
+        writer.writerows(sorted_transactions)
+
 def log_transaction(account_id, account_name, amount, transaction_type):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = get_transaction_date()
     with open(TRANSACTIONS_FILE, mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([timestamp, account_id, account_name, amount, transaction_type])
+    sort_transactions()
 
 def flows_manager(accounts):
     while True:
@@ -51,9 +76,9 @@ def flows_manager(accounts):
                 amount = float(input("Enter withdrawal amount (USDT): "))
                 log_transaction(selected_account['id'], selected_account['name'], amount, 'withdrawal')
             elif choice == '3':
-                break  # This will go back to account selection
+                break
             elif choice == '4':
-                return  # This will exit the entire flows_manager function
+                return
             else:
                 print("Invalid choice. Please try again.")
 
