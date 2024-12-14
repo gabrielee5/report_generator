@@ -4,6 +4,7 @@ import datetime
 from decimal import Decimal
 from main import parse_executions
 import json
+import sqlite3
 
 
 # Load environment variables
@@ -133,3 +134,36 @@ response = session.get_positions(
             settleCoin="USDT"
         )
 print(response)
+
+def count_account_days(account_name):
+    """
+    Count the number of days with data for a specific account.
+    
+    Args:
+        account_name (str): The name of the account to check
+        
+    Returns:
+        int: Number of days with data for the account
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect('database2.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT COUNT(DISTINCT date)
+        FROM daily_reports
+        WHERE account_name = ?
+        ''', (account_name,))
+        
+        return cursor.fetchone()[0]
+        
+    except sqlite3.Error as e:
+        print(f"Database error: {str(e)}")
+        return 0
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        return 0
+    finally:
+        if conn:
+            conn.close()

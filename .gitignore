@@ -10,3 +10,7 @@ plots
 transactions.csv
 cex_connection.py
 risk_report.py
+database2.db
+2.env
+backup.env
+db
