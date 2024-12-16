@@ -17,9 +17,6 @@ import matplotlib.dates as mdates
 from io import BytesIO
 from decimal import Decimal
 import logging
-import argparse
-import statistics
-from combined_report import generate_combined_report, daily_combined_report
 import time
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
@@ -761,6 +758,7 @@ def process_report_data(input_data, days_lookback=7):
         for return_data in adjusted_returns[1:]:  # Skip first day as it has 0 return
             cumulative_return *= (1 + return_data['daily_return'])
         total_adjusted_return = cumulative_return - 1
+        annualized_return = (1 + total_adjusted_return) ** (365 / days_active) - 1
 
         # Calculate additional metrics not in input data
         additional_data = {
@@ -785,7 +783,8 @@ def process_report_data(input_data, days_lookback=7):
             'total_withdraw': total_withdrawals,
             'total_profit': total_profit,
             'total_volume': all_time_metrics[3],
-            'total_adjusted_return': total_adjusted_return
+            'total_adjusted_return': total_adjusted_return,
+            'annualized_return': annualized_return
         }
         
         return additional_data
@@ -843,7 +842,7 @@ def create_account_summary(report_data):
         ["Net Exposure", f"{report_data['long_exposure'] - report_data['short_exposure']:,.2f} USDT"],
     ]
     headers = ["Metric", "Value"]
-    return create_table(data, headers=headers, col_widths=[2*inch, 2*inch])
+    return create_table(data, headers=headers, col_widths=[3*inch, 2*inch])
 
 def create_performance_metrics(report_data):
     """Create account summary table"""
@@ -867,7 +866,8 @@ def create_overall_performance_metrics(report_data):
         ["Total Withdrawn", f"{report_data['total_withdraw']:,.2f}"],
         ["Total Profit", f"{report_data['total_profit']:,.2f}"],
         ["Total Volume", f"{report_data['total_volume']:,.2f}"],
-        ["Adjusted Return", f"{report_data['total_adjusted_return']*100:.2f}%"],
+        ["Adjusted Return", f"{report_data['total_adjusted_return']*100:,.2f}%"],
+        ["Annualized Return", f"{report_data['annualized_return']*100:,.2f}%"],
     ]
     headers = ["Metric", "Value"]
     return create_table(data, headers=headers, col_widths=[3*inch, 2*inch])
@@ -1027,10 +1027,8 @@ def create_equity_graph(adjusted_returns, styles, days_to_show=None):
 
    return Image(img_buffer, width=8*inch, height=4*inch)
 
-def generate_weekly_report(report_data, processed_data):
+def generate_weekly_report(all_data):
     """Generate a daily trading report PDF"""
-    all_data = report_data.copy()
-    all_data.update(processed_data)
     try:
         # Default configuration
         config = {
@@ -1107,23 +1105,234 @@ def generate_weekly_report(report_data, processed_data):
         logging.error(f"Error generating report: {str(e)}")
         raise
 
-def weekly_report(combined_data):
-    accounts_data_list = list(combined_data['data'].values())
+# COMBINED REPORT
+def create_combined_summary(accounts_data):
+    """
+    Create a comparative account summary table for multiple accounts with metrics as columns
+    
+    Parameters:
+    accounts_data (list): List of dictionaries containing account data
+    
+    Returns:
+    Table: A formatted table comparing metrics across accounts
+    """
+    # Define the metrics we want to show and their formatting
+    metric_formats = {
+        "Current Equity": lambda x: f"{x['equity']:,.2f}",
+        "Open Positions": lambda x: str(x['open_positions']),
+        "Trades This Week": lambda x: str(x['last_x_days_trades']),
+        "Long Positions": lambda x: f"{x['long_positions']} ({x['long_ratio']:.2f}%)",
+        "Short Positions": lambda x: f"{x['short_positions']} ({x['short_ratio']:.2f}%)",
+        "Long Exposure": lambda x: f"{x['long_exposure']:,.2f}",
+        "Short Exposure": lambda x: f"{x['short_exposure']:,.2f}",
+        "Net Exposure": lambda x: f"{x['long_exposure'] - x['short_exposure']:,.2f}",
+    }
+    
+    # Create headers with metrics
+    headers = ["Account"] + list(metric_formats.keys())
+    
+    # Prepare data rows (one row per account)
+    data = []
+    for account in accounts_data:
+        row = [account["account_name"]]  # First column is the account name
+        # Add value for each metric
+        for metric, format_func in metric_formats.items():
+            try:
+                formatted_value = format_func(account)
+                row.append(formatted_value)
+            except KeyError:
+                row.append("N/A")  # Handle missing data gracefully
+        data.append(row)
+    
+    return create_table(data, headers=headers)
+
+def create_combined_performance_metrics(accounts_data):
+    """
+    Create a comparative account performance metrics table with metrics as columns
+    
+    Parameters:
+    accounts_data (list): List of dictionaries containing account data
+    
+    Returns:
+    Table: A formatted table comparing metrics across accounts
+    """
+    # Define the metrics we want to show and their formatting
+    metric_formats = {
+        "N. Trades": lambda x: f"{x['last_x_days_trades']}",
+        "Volume": lambda x: f"{x['last_x_days_volume']:,.2f}",
+        "Funding Fees": lambda x: f"{x['last_x_days_funding_fees']:,.2f}",
+        "Trading Fees": lambda x: f"{x['last_x_days_trading_fees']:,.2f}",
+        "Total Fees": lambda x: f"{x['last_x_days_funding_fees']:,.2f}",
+        "Previous Week Equity": lambda x: f"{x['previous_week_equity_usdt']:,.2f} USDT" if x['previous_week_equity_usdt'] is not None else "N/A",
+        "Performance This Week": lambda x: f"{x['equity_difference_usdt']:,.2f}%" if x['equity_difference_usdt'] is not None else "N/A",
+    }
+    
+    # Create headers with metrics
+    headers = ["Account"] + list(metric_formats.keys())
+    
+    # Prepare data rows (one row per account)
+    data = []
+    for account in accounts_data:
+        row = [account["account_name"]]  # First column is the account name
+        # Add value for each metric
+        for metric, format_func in metric_formats.items():
+            try:
+                formatted_value = format_func(account)
+                row.append(formatted_value)
+            except KeyError:
+                row.append("N/A")  # Handle missing data gracefully
+        data.append(row)
+    
+    return create_table(data, headers=headers)
+
+def create_combined_overall_perf_metrics(accounts_data):
+    """
+    Create a comparative account summary table for multiple accounts with metrics as columns
+    
+    Parameters:
+    accounts_data (list): List of dictionaries containing account data
+    
+    Returns:
+    Table: A formatted table comparing metrics across accounts
+    """
+    # Define the metrics we want to show and their formatting
+    metric_formats = {
+        "Days Active": lambda x: f"{x['days_active']}",
+        "Total Invested": lambda x: f"{x['total_deposit']:,.2f}",
+        "Total Withdrawn": lambda x: f"{x['total_withdraw']:,.2f}",
+        "Total Profit": lambda x: f"{x['total_profit']:,.2f}",
+        "Total Volume": lambda x: f"{x['total_volume']:,.2f}",
+        "Adjusted Return": lambda x: f"{x['total_adjusted_return']*100:,.2f}%",
+        "Annualized Return": lambda x: f"{x['annualized_return']*100:,.2f}%",
+    }
+    
+    # Create headers with metrics
+    headers = ["Account"] + list(metric_formats.keys())
+    
+    # Prepare data rows (one row per account)
+    data = []
+    for account in accounts_data:
+        row = [account["account_name"]]  # First column is the account name
+        # Add value for each metric
+        for metric, format_func in metric_formats.items():
+            try:
+                formatted_value = format_func(account)
+                row.append(formatted_value)
+            except KeyError:
+                row.append("N/A")  # Handle missing data gracefully
+        data.append(row)
+    
+    return create_table(data, headers=headers)
+
+def generate_combined_report(data):
+    accounts_data_list = list(data.values())
+    try:
+        # Default configuration
+        config = {
+            'primary_color': HexColor("#2a5e35"),
+            'secondary_color': HexColor("#E2E2E2"),
+            'page_size': landscape(letter),
+            'margins': {'right': 72, 'left': 72, 'top': 72, 'bottom': 18}
+        }
+
+        # Create directories
+        reports_dir = 'reports'
+        account_dir = os.path.join(reports_dir, 'total')
+        os.makedirs(account_dir, exist_ok=True)
+        
+        # Generate filepath
+        filename = f"combined_report_{accounts_data_list[0]['date']}.pdf"
+        filepath = os.path.join(account_dir, filename)
+        
+        # Initialize document
+        doc = SimpleDocTemplate(
+            filepath, 
+            pagesize=config['page_size'],
+            rightMargin=config['margins']['right'],
+            leftMargin=config['margins']['left'],
+            topMargin=config['margins']['top'],
+            bottomMargin=config['margins']['bottom']
+        )
+        
+        # Build elements list
+        elements = []
+
+        # Initialize styles with unique names
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='Center', alignment=1, textColor=config['primary_color'], fontSize=15))
+
+        # Title
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Title'],
+            fontSize=24,
+            textColor=config['primary_color'],
+            spaceAfter=12
+        )
+        elements.extend([
+            Paragraph(f"Daily Combined Report - {accounts_data_list[0]['date']}", title_style),
+            Spacer(1, 0.25*inch)
+        ])
+        
+        # Add sections
+        sections = [
+            ("1. Combined Summary", create_combined_summary(accounts_data_list)),
+            ("2. Weekly Performance Metrics", create_combined_performance_metrics(accounts_data_list)),
+            # ("4. Equity Curve", create_equity_graph(data.get('adjusted_returns'), styles)),
+            # ("5. Performance Analysis", create_performance_graph(data.get('adjusted_returns'), config['primary_color'], styles)),
+            ("3. Overall Performance", create_combined_overall_perf_metrics(accounts_data_list)),
+        ]
+        
+        for title, content in sections:
+            elements.extend([
+                Paragraph(title, styles['Heading2']),
+                Spacer(1, 0.25*inch), # added space after title
+                content,
+                Spacer(1, 0.25*inch)
+            ])
+        
+        # Build document
+        doc.build(elements)
+        logging.info(f"Report generated successfully: {filepath}")
+        return filepath
+        
+    except Exception as e:
+        logging.error(f"Error generating report: {str(e)}")
+        raise
+
+def weekly_report(data):
+    accounts_data_list = list(data['data'].values())
+    all_data_combined = {}
     for account_data in accounts_data_list:
         logging.info(f"Generating weekly report for {account_data['account_name']}...")
         try:
             processed_data = process_report_data(account_data)
-            filepath = generate_weekly_report(account_data, processed_data)
+            all_data = account_data.copy()
+            all_data.update(processed_data)
+            all_data_combined[account_data['account_name']] = all_data
+            filepath = generate_weekly_report(all_data)
             print(f"Report generated: {filepath}")
         except Exception as e:
             print(f"Failed to generate report: {e}")
+    return all_data_combined
+
+def weekly_report_all(all_data):
+    all_account_names = list(all_data.keys())
+    # print(all_account_names)
+    logging.info(f"Generating weekly combined report for {len(all_account_names)} accounts...")
+    try:
+        filepath = generate_combined_report(all_data)
+        print(f"Report generated: {filepath}")
+    except Exception as e:
+        print(f"Failed to generate report: {e}")
 
 # RUN
 def main():
     accounts = get_accounts_from_env()
     data = collect_daily_data(accounts)
-
-    weekly_report(data)
+    weekly_report_day = 6
+    all_data = weekly_report(data)
+    weekly_report_all(all_data)
 
 
 if __name__ == "__main__":
