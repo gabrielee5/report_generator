@@ -19,6 +19,7 @@ from decimal import Decimal
 import logging
 import time
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import colorsys
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -796,7 +797,7 @@ def process_report_data(input_data, days_lookback=7):
         logging.error(f"Unexpected error while preparing report data: {str(e)}")
         raise
 
-# REPORT
+# ACCOUNT REPORT
 def create_table(data, headers=None, col_widths=None, primary_color=HexColor("#2a5e35"), 
                 secondary_color=HexColor("#E2E2E2")):
     """Generic table creation function"""
@@ -1119,7 +1120,7 @@ def create_combined_summary(accounts_data):
     """
     # Define the metrics we want to show and their formatting
     metric_formats = {
-        "Current Equity": lambda x: f"{x['equity']:,.2f}",
+        "Equity": lambda x: f"{x['equity']:,.2f}",
         "Open Positions": lambda x: str(x['open_positions']),
         "Trades This Week": lambda x: str(x['last_x_days_trades']),
         "Long Positions": lambda x: f"{x['long_positions']} ({x['long_ratio']:.2f}%)",
@@ -1159,13 +1160,14 @@ def create_combined_performance_metrics(accounts_data):
     """
     # Define the metrics we want to show and their formatting
     metric_formats = {
+        "Equity": lambda x: f"{x['equity']:,.2f}",
         "N. Trades": lambda x: f"{x['last_x_days_trades']}",
         "Volume": lambda x: f"{x['last_x_days_volume']:,.2f}",
         "Funding Fees": lambda x: f"{x['last_x_days_funding_fees']:,.2f}",
         "Trading Fees": lambda x: f"{x['last_x_days_trading_fees']:,.2f}",
         "Total Fees": lambda x: f"{x['last_x_days_funding_fees']:,.2f}",
         "Previous Week Equity": lambda x: f"{x['previous_week_equity_usdt']:,.2f} USDT" if x['previous_week_equity_usdt'] is not None else "N/A",
-        "Performance This Week": lambda x: f"{x['equity_difference_usdt']:,.2f}%" if x['equity_difference_usdt'] is not None else "N/A",
+        "Return": lambda x: f"{x['equity_difference_usdt']:,.2f}%" if x['equity_difference_usdt'] is not None else "N/A",
     }
     
     # Create headers with metrics
@@ -1198,6 +1200,7 @@ def create_combined_overall_perf_metrics(accounts_data):
     """
     # Define the metrics we want to show and their formatting
     metric_formats = {
+        "Equity": lambda x: f"{x['equity']:,.2f}",
         "Days Active": lambda x: f"{x['days_active']}",
         "Total Invested": lambda x: f"{x['total_deposit']:,.2f}",
         "Total Withdrawn": lambda x: f"{x['total_withdraw']:,.2f}",
@@ -1224,6 +1227,98 @@ def create_combined_overall_perf_metrics(accounts_data):
         data.append(row)
     
     return create_table(data, headers=headers)
+
+def create_combined_perf_graph(accounts_data_list, primary_color, styles, days_to_show=30):
+    """
+    Create performance graph showing equity curves adjusted for deposits/withdrawals for multiple accounts
+    
+    Args:
+        accounts_data_list (list): List of dictionaries containing account data
+        primary_color: Base color for the graph lines
+        styles: Report styles
+        days_to_show (int): Number of days of data to display. Defaults to 30.
+    """
+    if not accounts_data_list or len(accounts_data_list) == 0:
+        return Paragraph("\nNo account data available.\n", styles['Normal'])
+        
+    # Set up the plot
+    plt.figure(figsize=(12, 6))
+    
+    # Generate distinct colors for each account
+    # Create color variations based on primary color
+    base_color_rgb = primary_color.rgb()
+    base_color_hsv = colorsys.rgb_to_hsv(base_color_rgb[0]/255, base_color_rgb[1]/255, base_color_rgb[2]/255)
+    num_accounts = len(accounts_data_list)
+    colors = []
+    
+    for i in range(num_accounts):
+        # Adjust hue while keeping saturation and value similar
+        hue = (base_color_hsv[0] + (i * 0.7/num_accounts)) % 1.0
+        rgb = colorsys.hsv_to_rgb(hue, base_color_hsv[1], base_color_hsv[2])
+        colors.append(rgb)
+    
+    # Find the latest end date across all accounts
+    latest_end_date = max(
+        datetime.datetime.strptime(account['adjusted_returns'][-1]['date'], '%Y-%m-%d')
+        for account in accounts_data_list
+    )
+    start_date = latest_end_date - datetime.timedelta(days=days_to_show)
+    
+    # Plot each account's performance
+    for idx, account_data in enumerate(accounts_data_list):
+        adjusted_returns = account_data['adjusted_returns']
+        account_name = account_data.get('account_name', f'Account {idx + 1}')
+        
+        # Filter data for the requested time period
+        filtered_returns = [
+            data for data in adjusted_returns 
+            if datetime.datetime.strptime(data['date'], '%Y-%m-%d') >= start_date
+        ]
+        
+        if not filtered_returns:
+            continue
+            
+        dates = [datetime.datetime.strptime(data['date'], '%Y-%m-%d') 
+                for data in filtered_returns]
+        
+        # Calculate normalized values
+        normalized_values = [100]  # Start at 100
+        for data in filtered_returns[1:]:
+            normalized_values.append(normalized_values[-1] * (1 + data['daily_return']))
+        
+        # Plot the line for this account
+        plt.plot(dates, normalized_values, 
+                # marker='o', 
+                # markersize=4,
+                linestyle='-', 
+                label=account_name,
+                linewidth=2)
+    
+    # Customize the plot
+    plt.title(f'Portfolio Performance Comparison ({days_to_show} Days)')
+    plt.xlabel('Date')
+    plt.ylabel('Value (Starting at 100)')
+    plt.grid(True, alpha=0.3)
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.gcf().autofmt_xdate()
+    plt.axhline(y=100, color='gray', linestyle='--', alpha=0.5)
+    
+    # Add legend
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Format y-axis
+    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}'))
+    
+    # Adjust layout to prevent legend cutoff
+    plt.tight_layout()
+    
+    # Save to buffer
+    img_buffer = BytesIO()
+    plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+    img_buffer.seek(0)
+    plt.close()
+
+    return Image(img_buffer, width=10*inch, height=5*inch)  # Slightly larger to accommodate legend
 
 def generate_combined_report(data):
     accounts_data_list = list(data.values())
@@ -1280,8 +1375,8 @@ def generate_combined_report(data):
             ("1. Combined Summary", create_combined_summary(accounts_data_list)),
             ("2. Weekly Performance Metrics", create_combined_performance_metrics(accounts_data_list)),
             # ("4. Equity Curve", create_equity_graph(data.get('adjusted_returns'), styles)),
-            # ("5. Performance Analysis", create_performance_graph(data.get('adjusted_returns'), config['primary_color'], styles)),
             ("3. Overall Performance", create_combined_overall_perf_metrics(accounts_data_list)),
+            ("4. Performance Analysis", create_combined_perf_graph(accounts_data_list, config['primary_color'], styles)),
         ]
         
         for title, content in sections:
@@ -1302,6 +1397,7 @@ def generate_combined_report(data):
         logging.error(f"Error generating report: {str(e)}")
         raise
 
+# PROCESS REPORT
 def weekly_report(data):
     accounts_data_list = list(data['data'].values())
     all_data_combined = {}
