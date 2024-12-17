@@ -599,6 +599,8 @@ def collect_daily_data(accounts):
             data = get_account_data(account)
             result['data'][account_name] = data
 
+            print(f"Data collected for {account_name}.")
+
         logging.info("Daily data collection completed successfully.")
         return result
 
@@ -1426,7 +1428,8 @@ def weekly_report_all(all_data):
         print(f"Failed to generate report: {e}")
 
 # RUN
-def main():
+def main2():
+    # script to use with cronjob
     parser = argparse.ArgumentParser(description='Trading Report Generator')
     parser.add_argument('--force-weekly', action='store_true', help='Force generate weekly report')
     args = parser.parse_args()
@@ -1440,6 +1443,12 @@ def main():
         all_data = weekly_report(data)
         weekly_report_all(all_data)
 
+def main():
+    accounts = get_accounts_from_env()
+    data = collect_daily_data(accounts)
+
+    all_data = weekly_report(data)
+    weekly_report_all(all_data)
 
 if __name__ == "__main__":
     main()
