@@ -20,6 +20,7 @@ import logging
 import time
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import colorsys
+import argparse
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1426,11 +1427,18 @@ def weekly_report_all(all_data):
 
 # RUN
 def main():
+    parser = argparse.ArgumentParser(description='Trading Report Generator')
+    parser.add_argument('--force-weekly', action='store_true', help='Force generate weekly report')
+    args = parser.parse_args()
+
     accounts = get_accounts_from_env()
     data = collect_daily_data(accounts)
-    weekly_report_day = 6
-    all_data = weekly_report(data)
-    weekly_report_all(all_data)
+
+    # Check if it's Sunday (weekday() returns 6 for Sunday) or if --force-weekly flag is used
+    # to change the day bare in mind: 0=monday, 6=sunday, ecc
+    if datetime.datetime.now().weekday() == 6 or args.force_weekly:
+        all_data = weekly_report(data)
+        weekly_report_all(all_data)
 
 
 if __name__ == "__main__":
