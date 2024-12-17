@@ -8,7 +8,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor
-from reportlab.platypus import Image
+from reportlab.platypus import Image, PageBreak
 import sqlite3
 import os
 import csv
@@ -1091,9 +1091,10 @@ def generate_weekly_report(all_data):
         for title, content in sections:
             elements.extend([
                 Paragraph(title, styles['Heading2']),
-                Spacer(1, 0.25*inch), # added space after title
+                Spacer(1, 0.25*inch),
                 content,
-                Spacer(1, 0.25*inch)
+                Spacer(1, 0.25*inch),
+                PageBreak(),
             ])
         
         # Build document
@@ -1286,9 +1287,10 @@ def generate_combined_report(data):
         for title, content in sections:
             elements.extend([
                 Paragraph(title, styles['Heading2']),
-                Spacer(1, 0.25*inch), # added space after title
+                Spacer(1, 0.25*inch),
                 content,
-                Spacer(1, 0.25*inch)
+                Spacer(1, 0.25*inch),
+                PageBreak(),
             ])
         
         # Build document
