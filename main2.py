@@ -1131,13 +1131,14 @@ def create_combined_summary(accounts_data):
     # Define the metrics we want to show and their formatting
     metric_formats = {
         "Equity": lambda x: f"{x['equity']:,.2f}",
-        "Open Positions": lambda x: str(x['open_positions']),
+        "Positions": lambda x: str(x['open_positions']),
         "Trades This Week": lambda x: str(x['last_x_days_trades']),
         "Long Positions": lambda x: f"{x['long_positions']} ({x['long_ratio']:.2f}%)",
         "Short Positions": lambda x: f"{x['short_positions']} ({x['short_ratio']:.2f}%)",
         "Long Exposure": lambda x: f"{x['long_exposure']:,.2f}",
         "Short Exposure": lambda x: f"{x['short_exposure']:,.2f}",
         "Net Exposure": lambda x: f"{x['long_exposure'] - x['short_exposure']:,.2f}",
+        "API": lambda x: x['days_to_expiration'],
     }
     
     # Create headers with metrics
