@@ -13,3 +13,4 @@ database2.db
 2.env
 backup.env
 db/database-backup.db
+db/database_old1.db

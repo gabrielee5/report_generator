@@ -534,6 +534,10 @@ def process_fees_and_volume(session):
         logging.error(f"Unexpected error processing fees and volume: {str(e)}")
         raise
 
+def api_expiration_days(session):
+    data = session.get_api_key_information()
+    return data['result']['deadlineDay']
+
 def get_account_data(account):
     """Generate account report data from various sources."""
     try:
@@ -553,6 +557,7 @@ def get_account_data(account):
         equity = calculate_equity(session)
         exposure_data = calculate_exposures_and_ratios(open_positions)
         fees = process_fees_and_volume(session)
+        days_to_expiration = api_expiration_days(session)
         
         # Get transaction data
         deposit, withdrawal = get_existing_transaction_data(today, account["name"])
@@ -576,6 +581,7 @@ def get_account_data(account):
             "trades": processed_trades,
             "deposit": deposit,
             "withdrawal": withdrawal,
+            "days_to_expiration": days_to_expiration,
         }
         
         store_daily_data(report_data)
@@ -844,6 +850,7 @@ def create_account_summary(report_data):
         ["Long Exposure", f"{report_data['long_exposure']:,.2f} USDT"],
         ["Short Exposure", f"{report_data['short_exposure']:,.2f} USDT"],
         ["Net Exposure", f"{report_data['long_exposure'] - report_data['short_exposure']:,.2f} USDT"],
+        ["Keys Expiration", f"{report_data['days_to_expiration']} days"],
     ]
     headers = ["Metric", "Value"]
     return create_table(data, headers=headers, col_widths=[3*inch, 2*inch])
