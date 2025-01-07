@@ -210,7 +210,6 @@ def analyze_trade_performance(account, days=7):
         for idx, position in enumerate(open_positions):
             symbol = position['symbol']
             side = position['side']
-            size = float(position['size'])
             
             # Convert creation time from milliseconds to datetime
             created_time = pd.to_datetime(int(position['createdTime']), unit='ms')
@@ -241,9 +240,6 @@ def analyze_trade_performance(account, days=7):
                 
                 # Get unique color for this symbol
                 color = get_unique_color(idx, num_positions)
-                
-                # Format creation time for label
-                created_time_str = created_time.strftime('%Y-%m-%d %H:%M')
                 
                 # Plot and store the line with its final value
                 line = plt.plot(df['timestamp'], df['performance'], 
@@ -291,9 +287,9 @@ def analyze_trade_performance(account, days=7):
                     alpha=0.7)
         
         # Save the plot
-        output_dir = 'analysis_output'
+        output_dir = 'positions_analysis'
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"trade_performance_{account['name']}_{datetime.now().strftime('%Y%m%d')}.png")
+        output_path = os.path.join(output_dir, f"{account['name']}_{datetime.now().strftime('%Y%m%d')}.png")
         plt.savefig(output_path, bbox_inches='tight', dpi=300)
         plt.close()
         
@@ -306,9 +302,12 @@ def analyze_trade_performance(account, days=7):
 
 def main():
     accounts = get_accounts_from_env()
+
+    days = 7
+
     for account in accounts:
         try:
-            output_path = analyze_trade_performance(account)
+            output_path = analyze_trade_performance(account, days=days)
             if output_path:
                 print(f"Analysis completed. Plot saved to: {output_path}")
         except Exception as e:
