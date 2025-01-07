@@ -14,3 +14,6 @@ database2.db
 backup.env
 db/database-backup.db
 db/database_old1.db
+
+data
+analysis_output
