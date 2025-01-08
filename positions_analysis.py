@@ -288,8 +288,10 @@ def analyze_trade_performance(account, days=7):
         
         # Save the plot
         output_dir = 'positions_analysis'
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{account['name']}_{datetime.now().strftime('%Y%m%d')}.png")
+        date = datetime.now().strftime('%Y%m%d')
+        sub_dir = os.path.join(output_dir, date)
+        os.makedirs(sub_dir, exist_ok=True)
+        output_path = os.path.join(sub_dir, f"{account['name']}_{date}.png")
         plt.savefig(output_path, bbox_inches='tight', dpi=300)
         plt.close()
         
