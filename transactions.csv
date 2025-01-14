@@ -13,3 +13,4 @@ Timestamp,Account ID,Account Name,Amount,Type
 2024-12-20,001,gabriele,3000.0,deposit
 2025-01-08,001,gabriele,2000.0,deposit
 2025-01-10,011,luca,745.0,deposit
+2025-01-14,002,giacomo,444.0,deposit
