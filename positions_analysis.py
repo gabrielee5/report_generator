@@ -23,7 +23,7 @@ import time
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import colorsys
 import argparse
-from main2 import get_accounts_from_env, get_all_open_positions
+from main import get_accounts_from_env, get_all_open_positions
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
