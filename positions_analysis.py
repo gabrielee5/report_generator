@@ -152,11 +152,12 @@ def get_historical_data(session, symbols, days=7, cache_dir='data'):
 def analyze_trade_performance(account, days=7):
     """
     Analyze trade performance and direction for a specific account.
-    Performance is normalized to start from zero at trade creation time.
+    Performance is normalized to start from zero at the beginning of the chart (left side).
+    Shows the last 7 days of price action, or from creation time if less than 7 days.
     
     Args:
         account (dict): Account credentials and information
-        days (int): Number of days to analyze
+        days (int): Number of days to analyze (default is 7)
     """
     try:
         # Initialize API session
@@ -201,24 +202,34 @@ def analyze_trade_performance(account, days=7):
             if symbol in historical_data:
                 df = historical_data[symbol].copy()
                 
-                # Filter data to start from creation time
-                df = df[df['timestamp'] >= created_time].copy()
+                # Determine the start time for the data
+                # Use the later of (current time - 7 days) or creation time
+                start_time = max(
+                    datetime.now() - timedelta(days=days),  # Last 7 days
+                    created_time  # Position creation time
+                )
+                
+                # Filter data to start from the determined start time
+                df = df[df['timestamp'] >= start_time].copy()
                 
                 if len(df) == 0:
                     logger.warning(f"No data available for {symbol} after creation time {created_time}")
                     continue
                 
-                # Get the close price at creation time (baseline for normalization)
-                creation_price = df['close'].iloc[0]
+                # Sort data chronologically (oldest to newest)
+                df = df.sort_values('timestamp')
+                
+                # Get the first close price for normalization
+                start_price = df['close'].iloc[0]
                 
                 # Calculate normalized performance
                 if side.lower() == 'buy':
-                    df['performance'] = ((df['close'] - creation_price) / creation_price) * 100
+                    df['performance'] = ((df['close'] - start_price) / start_price) * 100
                 else:
-                    df['performance'] = ((creation_price - df['close']) / creation_price) * 100
+                    df['performance'] = ((start_price - df['close']) / start_price) * 100
                 
-                # Normalize the timestamp to start from zero (relative to creation time)
-                df['time_elapsed'] = (df['timestamp'] - created_time).dt.total_seconds() / (24 * 3600)  # Convert to days
+                # Get unique color for this symbol
+                color = get_unique_color(idx, num_positions)
                 
                 # Plot and store the line with its final value
                 color = get_unique_color(idx, num_positions)
