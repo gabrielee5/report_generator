@@ -1,28 +1,11 @@
 from pybit.unified_trading import HTTP
-from dotenv import dotenv_values
 from datetime import datetime, timedelta
-from pybit.exceptions import InvalidRequestError
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib.colors import HexColor
-from reportlab.platypus import Image, PageBreak
-import sqlite3
 import os
-import csv
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from io import BytesIO
-from decimal import Decimal
 import logging
-import time
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import colorsys
-import argparse
 from main import get_accounts_from_env, get_all_open_positions
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -32,6 +15,7 @@ db_path = 'db/database.db'
 # Set up logging
 logging.basicConfig(filename='positions_analysis.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def get_unique_color(index, total):
     """Generate unique color using HSV color space for better distinction."""
@@ -61,7 +45,7 @@ def get_positions(account):
         print("-------------------------")
 
     except Exception as e:
-        logging.error(f"Error generating report for account {account['name']}: {str(e)}")
+        logger.error(f"Error generating report for account {account['name']}: {str(e)}")
         raise
 
 def get_historical_data(session, symbols, days=7, cache_dir='data'):
@@ -96,14 +80,14 @@ def get_historical_data(session, symbols, days=7, cache_dir='data'):
                                 # If timestamp is already datetime string
                                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                         except Exception as e:
-                            logging.error(f"Error converting cached timestamps for {symbol}: {e}")
+                            logger.error(f"Error converting cached timestamps for {symbol}: {e}")
                             continue
                             
                         all_data[symbol] = df
                         continue
             
             # Fetch new data from API
-            logging.info(f"Fetching new data for {symbol}")
+            logger.info(f"Fetching new data for {symbol}")
             try:
                 response = session.get_kline(
                     category="linear",
@@ -136,18 +120,18 @@ def get_historical_data(session, symbols, days=7, cache_dir='data'):
                     # Save to cache file
                     with open(cache_file, 'w') as f:
                         json.dump(cache_data, f)
-                    logging.info(f"Cached data for {symbol}")
+                    logger.info(f"Cached data for {symbol}")
                 else:
-                    logging.error(f"Error fetching data for {symbol}: {response['retMsg']}")
+                    logger.error(f"Error fetching data for {symbol}: {response['retMsg']}")
                     
             except Exception as api_error:
-                logging.error(f"API error for {symbol}: {api_error}")
+                logger.error(f"API error for {symbol}: {api_error}")
                 continue
         
         return all_data
         
     except Exception as e:
-        logging.error(f"Error in get_historical_data: {e}")
+        logger.error(f"Error in get_historical_data: {e}")
         # Try to recover using cached data
         try:
             all_data = {}
@@ -159,10 +143,10 @@ def get_historical_data(session, symbols, days=7, cache_dir='data'):
                         df = pd.DataFrame(cached_data['data'])
                         df['timestamp'] = pd.to_datetime(df['timestamp'])
                         all_data[symbol] = df
-                        logging.info(f"Recovered using cached data for {symbol}")
+                        logger.info(f"Recovered using cached data for {symbol}")
             return all_data if all_data else None
         except Exception as cache_error:
-            logging.error(f"Error reading cache: {cache_error}")
+            logger.error(f"Error reading cache: {cache_error}")
             return None
 
 def analyze_trade_performance(account, days=7):
@@ -185,7 +169,7 @@ def analyze_trade_performance(account, days=7):
         open_positions = get_all_open_positions(session)
         
         if not open_positions:
-            logging.info(f"No open positions found for account {account['name']}")
+            logger.info(f"No open positions found for account {account['name']}")
             return
             
         # Get symbols from open positions
@@ -195,7 +179,7 @@ def analyze_trade_performance(account, days=7):
         historical_data = get_historical_data(session, symbols, days=days)
         
         if not historical_data:
-            logging.error("Failed to fetch historical data")
+            logger.error("Failed to fetch historical data")
             return
             
         # Create visualization
@@ -217,32 +201,28 @@ def analyze_trade_performance(account, days=7):
             if symbol in historical_data:
                 df = historical_data[symbol].copy()
                 
-                # Filter data to start from creation time if it falls within our window
-                if created_time > df['timestamp'].iloc[-1]:
-                    # Find the closest timestamp after creation time
-                    df = df[df['timestamp'] >= created_time].copy()
-                    first_close = df['close'].iloc[-1]  # Use first available price after creation
-                else:
-                    first_close = df['close'].iloc[-1]  # Use oldest price in window
+                # Filter data to start from creation time
+                df = df[df['timestamp'] >= created_time].copy()
                 
                 if len(df) == 0:
-                    logging.warning(f"No data available for {symbol} after creation time")
+                    logger.warning(f"No data available for {symbol} after creation time {created_time}")
                     continue
                 
-                # Calculate performance based on position side relative to the first price
+                # Get the close price at creation time (baseline for normalization)
+                creation_price = df['close'].iloc[0]
+                
+                # Calculate normalized performance
                 if side.lower() == 'buy':
-                    df['performance'] = ((df['close'] - first_close) / first_close) * 100
+                    df['performance'] = ((df['close'] - creation_price) / creation_price) * 100
                 else:
-                    df['performance'] = ((first_close - df['close']) / first_close) * 100
+                    df['performance'] = ((creation_price - df['close']) / creation_price) * 100
                 
-                # Reverse the data so it starts from zero
-                df = df.iloc[::-1]
-                
-                # Get unique color for this symbol
-                color = get_unique_color(idx, num_positions)
+                # Normalize the timestamp to start from zero (relative to creation time)
+                df['time_elapsed'] = (df['timestamp'] - created_time).dt.total_seconds() / (24 * 3600)  # Convert to days
                 
                 # Plot and store the line with its final value
-                line = plt.plot(df['timestamp'], df['performance'], 
+                color = get_unique_color(idx, num_positions)
+                line = plt.plot(df['time_elapsed'], df['performance'], 
                               label=f"{symbol} ({side})", 
                               color=color,
                               linewidth=2,
@@ -264,27 +244,16 @@ def analyze_trade_performance(account, days=7):
             fontsize=8
         )
         
-        plt.title(f"Trade Performance for {account['name']} (Last {days} Days)")
-        plt.xlabel("Date")
+        plt.title(f"Trade Performance for {account['name']} (Normalized from Creation Time)")
+        plt.xlabel("Time Elapsed (Days)")
         plt.ylabel("Performance Change (%)")
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.axhline(y=0, color='black', linestyle='--', alpha=0.3)
         
-        # Format x-axis to show dates nicely
-        plt.gcf().autofmt_xdate()  # Rotate and align the tick labels
+        # Format x-axis to show elapsed time
+        plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1f}"))
         
         plt.tight_layout()
-        
-        # Add timestamp range in the corner
-        if historical_data and len(historical_data) > 0:
-            first_symbol = list(historical_data.keys())[0]
-            date_range = historical_data[first_symbol]['timestamp']
-            start_date = date_range.iloc[-1].strftime('%Y-%m-%d')
-            end_date = date_range.iloc[0].strftime('%Y-%m-%d')
-            plt.text(0.02, 0.02, f'Period: {start_date} to {end_date}', 
-                    transform=plt.gca().transAxes, 
-                    fontsize=8, 
-                    alpha=0.7)
         
         # Save the plot
         output_dir = 'positions_analysis'
@@ -295,11 +264,11 @@ def analyze_trade_performance(account, days=7):
         plt.savefig(output_path, bbox_inches='tight', dpi=300)
         plt.close()
         
-        logging.info(f"Trade analysis completed for account {account['name']}. Plot saved to {output_path}")
+        logger.info(f"Trade analysis completed for account {account['name']}. Plot saved to {output_path}")
         return output_path
         
     except Exception as e:
-        logging.error(f"Error analyzing trade performance for account {account['name']}: {str(e)}")
+        logger.error(f"Error analyzing trade performance for account {account['name']}: {str(e)}")
         raise
 
 def main():
