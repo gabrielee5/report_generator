@@ -168,11 +168,12 @@ def get_historical_data(session, symbols, days=7, cache_dir='data'):
 def analyze_trade_performance(account, days=7):
     """
     Analyze trade performance and direction for a specific account.
-    Performance is normalized to start from zero at trade creation time.
+    Performance is normalized to start from zero at the beginning of the chart (left side).
+    Shows the last 7 days of price action, or from creation time if less than 7 days.
     
     Args:
         account (dict): Account credentials and information
-        days (int): Number of days to analyze
+        days (int): Number of days to analyze (default is 7)
     """
     try:
         # Initialize API session
@@ -217,26 +218,31 @@ def analyze_trade_performance(account, days=7):
             if symbol in historical_data:
                 df = historical_data[symbol].copy()
                 
-                # Filter data to start from creation time if it falls within our window
-                if created_time > df['timestamp'].iloc[-1]:
-                    # Find the closest timestamp after creation time
-                    df = df[df['timestamp'] >= created_time].copy()
-                    first_close = df['close'].iloc[-1]  # Use first available price after creation
-                else:
-                    first_close = df['close'].iloc[-1]  # Use oldest price in window
+                # Determine the start time for the data
+                # Use the later of (current time - 7 days) or creation time
+                start_time = max(
+                    datetime.now() - timedelta(days=days),  # Last 7 days
+                    created_time  # Position creation time
+                )
+                
+                # Filter data to start from the determined start time
+                df = df[df['timestamp'] >= start_time].copy()
                 
                 if len(df) == 0:
                     logging.warning(f"No data available for {symbol} after creation time")
                     continue
                 
-                # Calculate performance based on position side relative to the first price
-                if side.lower() == 'buy':
-                    df['performance'] = ((df['close'] - first_close) / first_close) * 100
-                else:
-                    df['performance'] = ((first_close - df['close']) / first_close) * 100
+                # Sort data chronologically (oldest to newest)
+                df = df.sort_values('timestamp')
                 
-                # Reverse the data so it starts from zero
-                df = df.iloc[::-1]
+                # Get the first close price for normalization
+                start_price = df['close'].iloc[0]
+                
+                # Calculate normalized performance
+                if side.lower() == 'buy':
+                    df['performance'] = ((df['close'] - start_price) / start_price) * 100
+                else:
+                    df['performance'] = ((start_price - df['close']) / start_price) * 100
                 
                 # Get unique color for this symbol
                 color = get_unique_color(idx, num_positions)
@@ -274,17 +280,6 @@ def analyze_trade_performance(account, days=7):
         plt.gcf().autofmt_xdate()  # Rotate and align the tick labels
         
         plt.tight_layout()
-        
-        # Add timestamp range in the corner
-        if historical_data and len(historical_data) > 0:
-            first_symbol = list(historical_data.keys())[0]
-            date_range = historical_data[first_symbol]['timestamp']
-            start_date = date_range.iloc[-1].strftime('%Y-%m-%d')
-            end_date = date_range.iloc[0].strftime('%Y-%m-%d')
-            plt.text(0.02, 0.02, f'Period: {start_date} to {end_date}', 
-                    transform=plt.gca().transAxes, 
-                    fontsize=8, 
-                    alpha=0.7)
         
         # Save the plot
         output_dir = 'positions_analysis'
