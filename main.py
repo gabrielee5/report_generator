@@ -1453,6 +1453,7 @@ def main2():
 
 def main():
     accounts = get_accounts_from_env()
+    print(f"Active accounts: {len(accounts)}")
     data = collect_daily_data(accounts)
 
     all_data = weekly_report(data)
