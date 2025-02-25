@@ -600,12 +600,16 @@ def collect_daily_data(accounts):
         initialize_database()
         
         for account in accounts:
-            account_name = account['name']
-            logging.info(f"Collecting daily data for {account_name}...")
-            data = get_account_data(account)
-            result['data'][account_name] = data
-
-            print(f"Data collected for {account_name}.")
+            try:
+                account_name = account['name']
+                logging.info(f"Collecting daily data for {account_name}...")
+                data = get_account_data(account)
+                result['data'][account_name] = data
+                print(f"Data collected for {account_name}.")
+            except Exception as e:
+                logging.warning(f"Failed to collect data for account {account.get('name', 'unknown')}: {str(e)}")
+                print(f"Skipping account {account.get('name', 'unknown')} due to error: {str(e)}")
+                # Continue with the next account instead of terminating
 
         logging.info("Daily data collection completed successfully.")
         return result
@@ -613,6 +617,8 @@ def collect_daily_data(accounts):
     except Exception as e:
         logging.error(f"Error in daily data collection: {str(e)}")
         print(f"An error occurred. Please check the log file for details.")
+        # Return the partial result instead of None
+        return result
 
 # CALCULATIONS
 def get_account_days(account_name):
