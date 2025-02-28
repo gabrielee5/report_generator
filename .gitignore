@@ -1,5 +1,6 @@
 .env
 venv
+venv2
 reports/
 __pycache__/
 trading_report.log
@@ -18,3 +19,4 @@ db/database_old1.db
 data
 analysis_output
 positions_analysis
+analysis_reports
