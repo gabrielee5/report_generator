@@ -257,12 +257,25 @@ class TradingAnalyzer:
         if account:
             df = df[df['account_name'] == account]
             
+        if df.empty:
+            # Create an empty figure with a message if no data
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.text(0.5, 0.5, 'No data available for drawdown analysis', 
+                    horizontalalignment='center', verticalalignment='center',
+                    transform=ax.transAxes)
+            plt.tight_layout()
+            return fig
+            
         # Create the plot
         fig, ax = plt.subplots(figsize=figsize)
         
         for account_name in df['account_name'].unique():
             account_df = df[df['account_name'] == account_name]
             
+            # Skip if only one data point
+            if len(account_df) <= 1:
+                continue
+                
             # Calculate running maximum
             account_df['running_max'] = account_df['equity'].cummax()
             
@@ -282,8 +295,20 @@ class TradingAnalyzer:
         # Add zero line
         ax.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
         
-        # Ensure y-axis is negative (drawdowns are negative)
-        ax.set_ylim(bottom=df['equity'].min() / df['equity'].cummax().max() * 100 - 5, top=5)
+        # Check if we have data to determine y-axis limits
+        if not any(account_df['equity'].cummax().max() for account_name in df['account_name'].unique() 
+                 for account_df in [df[df['account_name'] == account_name]] if len(account_df) > 1):
+            # No valid data, set default limits
+            ax.set_ylim(bottom=-10, top=5)
+        else:
+            # Calculate the minimum drawdown across all accounts
+            min_drawdown = min(
+                (account_df['equity'].min() / account_df['equity'].cummax().max() * 100 - 5)
+                for account_name in df['account_name'].unique()
+                for account_df in [df[df['account_name'] == account_name]]
+                if len(account_df) > 1 and account_df['equity'].cummax().max() > 0
+            )
+            ax.set_ylim(bottom=min_drawdown, top=5)
         
         plt.legend()
         plt.grid(True, alpha=0.3)
@@ -479,7 +504,7 @@ class TradingAnalyzer:
             fig, ax = plt.subplots(figsize=figsize)
             
             # Use seaborn heatmap
-            sns.heatmap(
+            hm = sns.heatmap(
                 pivot_table * 100,  # Convert to percentage
                 ax=ax,
                 annot=True,
@@ -495,10 +520,23 @@ class TradingAnalyzer:
             ax.set_ylabel('Year')
             ax.set_xlabel('Month')
             
-            # Replace month numbers with names
-            month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-            ax.set_xticklabels(month_names, rotation=0)
+            # Get the current x-tick locations and labels
+            current_ticks = ax.get_xticks()
+            
+            # Replace month numbers with names only if there are exactly 12 columns
+            if len(current_ticks) == 12:
+                month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+                ax.set_xticklabels(month_names, rotation=0)
+            else:
+                # For less than 12 months, use the actual month numbers from the pivot table
+                actual_months = pivot_table.columns.tolist()
+                month_abbr = {
+                    1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
+                    7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
+                }
+                labels = [month_abbr.get(m, str(m)) for m in actual_months]
+                ax.set_xticklabels(labels, rotation=0)
             
             plt.tight_layout()
             figs.append(fig)
@@ -579,54 +617,87 @@ class TradingAnalyzer:
         report_dir = os.path.join(output_dir, report_name)
         os.makedirs(report_dir, exist_ok=True)
         
-        # Generate plots
-        plots = {
-            'equity_curve': self.create_equity_curve(account=account, days=days),
-            'drawdown': self.create_drawdown_chart(account=account, days=days),
-            'exposure': self.analyze_exposure(account=account, days=days),
-            'trading_activity': self.analyze_trading_activity(account=account, days=days),
-            'fees': self.analyze_fees(account=account, days=days),
-            'performance_dist': self.performance_distribution(account=account, days=days)
-        }
+        # Generate plots with error handling
+        plots = {}
+        try:
+            plots['equity_curve'] = self.create_equity_curve(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating equity curve: {e}")
+        
+        try:
+            plots['drawdown'] = self.create_drawdown_chart(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating drawdown chart: {e}")
+            
+        try:
+            plots['exposure'] = self.analyze_exposure(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating exposure analysis: {e}")
+            
+        try:
+            plots['trading_activity'] = self.analyze_trading_activity(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating trading activity: {e}")
+            
+        try:
+            plots['fees'] = self.analyze_fees(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating fee analysis: {e}")
+            
+        try:
+            plots['performance_dist'] = self.performance_distribution(account=account, days=days)
+        except Exception as e:
+            print(f"Error generating performance distribution: {e}")
         
         # Save plots
         for name, fig in plots.items():
-            fig.savefig(os.path.join(report_dir, f"{name}.png"), dpi=300, bbox_inches='tight')
-            plt.close(fig)
+            try:
+                fig.savefig(os.path.join(report_dir, f"{name}.png"), dpi=300, bbox_inches='tight')
+                plt.close(fig)
+            except Exception as e:
+                print(f"Error saving {name} plot: {e}")
             
-        # Generate monthly heatmaps
-        heatmaps = self.monthly_performance_heatmap(account=account)
-        for i, fig in enumerate(heatmaps):
-            fig.savefig(os.path.join(report_dir, f"monthly_heatmap_{i}.png"), dpi=300, bbox_inches='tight')
-            plt.close(fig)
+        # Generate monthly heatmaps with error handling
+        try:
+            heatmaps = self.monthly_performance_heatmap(account=account)
+            for i, fig in enumerate(heatmaps):
+                fig.savefig(os.path.join(report_dir, f"monthly_heatmap_{i}.png"), dpi=300, bbox_inches='tight')
+                plt.close(fig)
+        except Exception as e:
+            print(f"Error generating monthly heatmaps: {e}")
             
-        # Calculate metrics
-        returns_df = self.calculate_returns(account=account)
-        if days:
-            cutoff_date = (datetime.now() - timedelta(days=days)).date()
-            returns_df = returns_df[returns_df['date'].dt.date >= cutoff_date]
-            
-        metrics = self.calculate_metrics(returns_df=returns_df, account=account)
-        
-        # Create metrics summary
-        metrics_df = pd.DataFrame.from_dict(metrics, orient='index')
-        
-        # Format metrics for readability
-        formatted_metrics = metrics_df.copy()
-        for col in formatted_metrics.columns:
-            if col in ['total_return', 'annualized_return', 'volatility', 'sharpe_ratio', 
-                      'max_drawdown', 'win_rate', 'best_day', 'worst_day', 'avg_gain', 'avg_loss']:
-                formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x*100:.2f}%")
-            elif col in ['profit_factor']:
-                formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x:.2f}")
-            elif col in ['last_equity']:
-                formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x:,.2f}")
+        # Calculate metrics with error handling
+        try:
+            returns_df = self.calculate_returns(account=account)
+            if days:
+                cutoff_date = (datetime.now() - timedelta(days=days)).date()
+                returns_df = returns_df[returns_df['date'].dt.date >= cutoff_date]
                 
-        # Save metrics to CSV
-        metrics_df.to_csv(os.path.join(report_dir, "metrics.csv"))
-        
-        # Generate HTML report
-        self._generate_html_report(report_dir, formatted_metrics, account, days)
+            metrics = self.calculate_metrics(returns_df=returns_df, account=account)
+            
+            # Create metrics summary
+            metrics_df = pd.DataFrame.from_dict(metrics, orient='index')
+            
+            # Format metrics for readability
+            formatted_metrics = metrics_df.copy()
+            for col in formatted_metrics.columns:
+                if col in ['total_return', 'annualized_return', 'volatility', 'sharpe_ratio', 
+                          'max_drawdown', 'win_rate', 'best_day', 'worst_day', 'avg_gain', 'avg_loss']:
+                    formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x*100:.2f}%")
+                elif col in ['profit_factor']:
+                    formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x:.2f}")
+                elif col in ['last_equity']:
+                    formatted_metrics[col] = formatted_metrics[col].apply(lambda x: f"{x:,.2f}")
+                    
+            # Save metrics to CSV
+            metrics_df.to_csv(os.path.join(report_dir, "metrics.csv"))
+            
+            # Generate HTML report
+            self._generate_html_report(report_dir, formatted_metrics, account, days)
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+            # Generate HTML report even if metrics fail
+            self._generate_html_report(report_dir, pd.DataFrame(), account, days)
         
         print(f"Report generated: {report_dir}")
         return report_dir
@@ -641,6 +712,60 @@ class TradingAnalyzer:
             account (str, optional): Specific account analyzed
             days (int, optional): Number of days analyzed
         """
+        # Check if metrics_df is empty
+        if metrics_df.empty:
+            metrics_html = "<p>No metrics available - not enough data to calculate.</p>"
+        else:
+            # Create table header
+            metrics_html = """
+            <table>
+                <tr>
+                    <th>Account</th>
+                    <th>Total Days</th>
+                    <th>Total Return</th>
+                    <th>Annualized Return</th>
+                    <th>Volatility</th>
+                    <th>Sharpe Ratio</th>
+                    <th>Max Drawdown</th>
+                    <th>Win Rate</th>
+                """
+            
+            # Add profit factor column if available
+            if 'profit_factor' in metrics_df.columns:
+                metrics_html += "<th>Profit Factor</th>\n"
+                
+            # Add last equity column if available
+            if 'last_equity' in metrics_df.columns:
+                metrics_html += "<th>Last Equity</th>\n"
+                
+            metrics_html += "</tr>\n"
+            
+            # Add metrics rows
+            for index, row in metrics_df.iterrows():
+                metrics_html += f"""
+                <tr>
+                    <td>{index}</td>
+                    <td>{row.get('total_days', 'N/A')}</td>
+                    <td>{row.get('total_return', 'N/A')}</td>
+                    <td>{row.get('annualized_return', 'N/A')}</td>
+                    <td>{row.get('volatility', 'N/A')}</td>
+                    <td>{row.get('sharpe_ratio', 'N/A')}</td>
+                    <td>{row.get('max_drawdown', 'N/A')}</td>
+                    <td>{row.get('win_rate', 'N/A')}</td>
+                """
+                
+                # Add profit factor if available
+                if 'profit_factor' in row:
+                    metrics_html += f"<td>{row['profit_factor']}</td>\n"
+                    
+                # Add last equity if available
+                if 'last_equity' in row:
+                    metrics_html += f"<td>{row['last_equity']}</td>\n"
+                    
+                metrics_html += "</tr>\n"
+                
+            metrics_html += "</table>\n"
+        
         # Create HTML content
         html_content = f"""
         <!DOCTYPE html>
@@ -665,71 +790,27 @@ class TradingAnalyzer:
             <p><strong>Period:</strong> {f"Last {days} days" if days else "All available data"}</p>
             
             <h2>Performance Metrics</h2>
-            <table>
-                <tr>
-                    <th>Account</th>
-                    <th>Total Days</th>
-                    <th>Total Return</th>
-                    <th>Annualized Return</th>
-                    <th>Volatility</th>
-                    <th>Sharpe Ratio</th>
-                    <th>Max Drawdown</th>
-                    <th>Win Rate</th>
-                    <th>Profit Factor</th>
-                    <th>Last Equity</th>
-                </tr>
+            {metrics_html}
         """
         
-        # Add metrics rows
-        for index, row in metrics_df.iterrows():
-            html_content += f"""
-                <tr>
-                    <td>{index}</td>
-                    <td>{row['total_days']}</td>
-                    <td>{row['total_return']}</td>
-                    <td>{row['annualized_return']}</td>
-                    <td>{row['volatility']}</td>
-                    <td>{row['sharpe_ratio']}</td>
-                    <td>{row['max_drawdown']}</td>
-                    <td>{row['win_rate']}</td>
-                    <td>{row['profit_factor']}</td>
-                    <td>{row['last_equity']}</td>
-                </tr>
-            """
-            
-        html_content += """
-            </table>
-            
-            <h2>Equity Curve</h2>
-            <div class="plot-container">
-                <img src="equity_curve.png" alt="Equity Curve">
-            </div>
-            
-            <h2>Drawdown Analysis</h2>
-            <div class="plot-container">
-                <img src="drawdown.png" alt="Drawdown Analysis">
-            </div>
-            
-            <h2>Net Exposure</h2>
-            <div class="plot-container">
-                <img src="exposure.png" alt="Net Exposure">
-            </div>
-            
-            <h2>Trading Activity</h2>
-            <div class="plot-container">
-                <img src="trading_activity.png" alt="Trading Activity">
-            </div>
-            
-            <h2>Fee Analysis</h2>
-            <div class="plot-container">
-                <img src="fees.png" alt="Fee Analysis">
-            </div>
-            
-            <h2>Daily Returns Distribution</h2>
-            <div class="plot-container">
-                <img src="performance_dist.png" alt="Performance Distribution">
-            </div>
-        """
+        # Check if each plot file exists before adding it to the HTML
+        plot_sections = [
+            ("Equity Curve", "equity_curve.png"),
+            ("Drawdown Analysis", "drawdown.png"),
+            ("Net Exposure", "exposure.png"),
+            ("Trading Activity", "trading_activity.png"),
+            ("Fee Analysis", "fees.png"),
+            ("Daily Returns Distribution", "performance_dist.png")
+        ]
+        
+        for title, filename in plot_sections:
+            if os.path.exists(os.path.join(report_dir, filename)):
+                html_content += f"""
+                <h2>{title}</h2>
+                <div class="plot-container">
+                    <img src="{filename}" alt="{title}">
+                </div>
+                """
         
         # Add monthly heatmaps if they exist
         heatmap_files = [f for f in os.listdir(report_dir) if f.startswith("monthly_heatmap_")]
