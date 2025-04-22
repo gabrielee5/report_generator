@@ -16,3 +16,7 @@ The structure of the .env file should be this:
     001_api_key = "abc"
     001_api_secret = "xyz"
     001_name = "account1"
+
+
+## TO DO
+The positions_analysis file needs some adjustments as it doesnt do what it is supposted to.
