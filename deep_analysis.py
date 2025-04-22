@@ -254,10 +254,8 @@ class TradingAnalyzer:
         return df
     
     def calculate_daily_returns(self, df):
-        """Calculate daily returns based on normalized equity."""
-        df = df.copy()
-        df['prev_norm_equity'] = df['normalized_equity'].shift(1)
-        df['daily_return'] = (df['normalized_equity'] - df['prev_norm_equity']) / df['prev_norm_equity']
+        """Calculate daily returns from already computed values in the normalized equity calculation."""
+        # Daily returns were already calculated in the normalized equity function
         return df
     
     def calculate_performance_metrics(self, account_name=None):
@@ -273,7 +271,7 @@ class TradingAnalyzer:
         
         # Calculate metrics by account
         metrics = {}
-        risk_free_rate = 0.02 / 252  # Assume 2% annual risk-free rate, daily
+        risk_free_rate = 0.02 / 365  # Assume 2% annual risk-free rate, daily
         
         for name, group in df.groupby('account_name'):
             # Calculate normalized equity and returns
@@ -291,12 +289,12 @@ class TradingAnalyzer:
             
             # Sharpe Ratio (annualized)
             excess_return = avg_return - risk_free_rate
-            sharpe = excess_return / std_return * np.sqrt(252) if std_return > 0 else 0
+            sharpe = excess_return / std_return * np.sqrt(365) if std_return > 0 else 0
             
             # Sortino Ratio
             downside_returns = returns[returns < 0]
             downside_deviation = downside_returns.std() if len(downside_returns) > 0 else 0
-            sortino = excess_return / downside_deviation * np.sqrt(252) if downside_deviation > 0 else 0
+            sortino = excess_return / downside_deviation * np.sqrt(365) if downside_deviation > 0 else 0
             
             # Win rate (positive return days)
             win_rate = (returns > 0).mean()
@@ -308,14 +306,14 @@ class TradingAnalyzer:
             max_drawdown = drawdown.min()
             
             # Calmar Ratio (annualized return / max drawdown)
-            annualized_return = (1 + avg_return) ** 252 - 1
+            annualized_return = (1 + avg_return) ** 365 - 1
             calmar = abs(annualized_return / max_drawdown) if max_drawdown < 0 else 0
             
             metrics[name] = {
                 'avg_daily_return': avg_return,
                 'annualized_return': annualized_return,
                 'daily_volatility': std_return,
-                'annualized_volatility': std_return * np.sqrt(252),
+                'annualized_volatility': std_return * np.sqrt(365),
                 'sharpe_ratio': sharpe,
                 'sortino_ratio': sortino,
                 'calmar_ratio': calmar,
@@ -417,45 +415,52 @@ class TradingAnalyzer:
                 pdf.savefig()
                 plt.close()
                 
-                # 2. Equity Curve with Deposits/Withdrawals
-                fig = plt.figure(figsize=(10, 12))
-                gs = gridspec.GridSpec(3, 1, height_ratios=[2, 1, 1])
+                # 2. Create figure with separate graphs for equity curves
+                fig = plt.figure(figsize=(10, 15))
+                gs = gridspec.GridSpec(4, 1, height_ratios=[2, 2, 1, 1])
                 
-                # Plot normalized equity curve
+                # Plot raw equity curve
                 ax1 = plt.subplot(gs[0])
-                ax1.plot(norm_df['date'], norm_df['normalized_equity'], label='Normalized Equity', color='blue', linewidth=2)
-                ax1.plot(df['date'], df['equity'], label='Raw Equity', color='lightblue', alpha=0.7)
-                ax1.set_title(f'Equity Curve for {acc}', fontsize=14)
+                ax1.plot(df['date'], df['equity'], label='Raw Equity', color='green', linewidth=2)
+                ax1.set_title(f'Raw Equity Curve for {acc}', fontsize=14)
                 ax1.set_ylabel('Equity Value', fontsize=12)
                 ax1.legend()
                 ax1.grid(True)
                 
-                # Plot deposits and withdrawals
-                ax2 = plt.subplot(gs[1], sharex=ax1)
-                ax2.bar(df['date'], df['deposit'], label='Deposits', color='green', alpha=0.7)
-                ax2.bar(df['date'], -df['withdrawal'], label='Withdrawals', color='red', alpha=0.7)
-                ax2.set_title('Deposits and Withdrawals', fontsize=14)
-                ax2.set_ylabel('Amount', fontsize=12)
+                # Plot normalized equity curve
+                ax2 = plt.subplot(gs[1])
+                ax2.plot(norm_df['date'], norm_df['normalized_equity'], label='Normalized Equity (Starting at 100)', color='blue', linewidth=2)
+                ax2.set_title(f'Normalized Equity Curve for {acc} (Starting at 100)', fontsize=14)
+                ax2.set_ylabel('Normalized Equity Value', fontsize=12)
                 ax2.legend()
                 ax2.grid(True)
                 
-                # Plot net exposure and normalized equity
+                # Plot deposits and withdrawals
                 ax3 = plt.subplot(gs[2], sharex=ax1)
-                ax3.bar(df['date'], df['long_exposure'] - df['short_exposure'].abs(), label='Net Exposure', color='purple', alpha=0.7)
+                ax3.bar(df['date'], df['deposit'], label='Deposits', color='green', alpha=0.7)
+                ax3.bar(df['date'], -df['withdrawal'], label='Withdrawals', color='red', alpha=0.7)
+                ax3.set_title('Deposits and Withdrawals', fontsize=14)
+                ax3.set_ylabel('Amount', fontsize=12)
+                ax3.legend()
+                ax3.grid(True)
+                
+                # Plot net exposure and normalized equity
+                ax4 = plt.subplot(gs[3], sharex=ax1)
+                ax4.bar(df['date'], df['long_exposure'] - df['short_exposure'].abs(), label='Net Exposure', color='purple', alpha=0.7)
                 
                 # Create a twin y-axis for the normalized equity
-                ax3_twin = ax3.twinx()
-                ax3_twin.plot(norm_df['date'], norm_df['normalized_equity'], label='Normalized Equity', color='blue', linestyle='--')
+                ax4_twin = ax4.twinx()
+                ax4_twin.plot(norm_df['date'], norm_df['normalized_equity'], label='Normalized Equity (100 Base)', color='blue', linestyle='--')
                 
-                ax3.set_title('Net Exposure vs Normalized Equity', fontsize=14)
-                ax3.set_xlabel('Date', fontsize=12)
-                ax3.set_ylabel('Net Exposure', fontsize=12)
-                ax3_twin.set_ylabel('Normalized Equity', fontsize=12)
+                ax4.set_title('Net Exposure vs Normalized Equity', fontsize=14)
+                ax4.set_xlabel('Date', fontsize=12)
+                ax4.set_ylabel('Net Exposure', fontsize=12)
+                ax4_twin.set_ylabel('Normalized Equity (Starting at 100)', fontsize=12)
                 
                 # Combine legends from both axes
-                lines1, labels1 = ax3.get_legend_handles_labels()
-                lines2, labels2 = ax3_twin.get_legend_handles_labels()
-                ax3.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+                lines1, labels1 = ax4.get_legend_handles_labels()
+                lines2, labels2 = ax4_twin.get_legend_handles_labels()
+                ax4.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
                 
                 ax3.grid(True)
                 plt.tight_layout()
@@ -507,12 +512,12 @@ class TradingAnalyzer:
                 
                 # 5. Monthly returns heatmap
                 if len(valid_data) >= 30:
+                    # Make a copy to avoid the SettingWithCopyWarning
                     monthly_data = valid_data.copy()
                     monthly_data.loc[:, 'year'] = monthly_data['date'].dt.year
                     monthly_data.loc[:, 'month'] = monthly_data['date'].dt.month
                     
-                    
-                    # Calculate monthly returns - use monthly_data instead of valid_data
+                    # Calculate monthly returns
                     monthly_returns = monthly_data.groupby(['year', 'month'])['daily_return'].apply(
                         lambda x: (1 + x).prod() - 1
                     ).unstack()
