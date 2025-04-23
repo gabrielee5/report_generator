@@ -163,14 +163,25 @@ def analyze_filled_returns(filled_df):
         filled_df (pandas.DataFrame): DataFrame with filled missing days
         
     Returns:
-        dict: Dictionary with performance metrics
+        dict: Dictionary with performance metrics including total return and days active
     """
     # Filter out rows with NaN returns
     valid_returns = filled_df.dropna(subset=['filled_daily_return'])
     
+    # Calculate total return (from first to last normalized equity value)
+    first_equity = filled_df['normalized_equity'].iloc[0]
+    last_equity = filled_df['normalized_equity'].iloc[-1]
+    total_return = (last_equity / first_equity) - 1
+    
+    # Calculate days active (difference between first and last date)
+    first_date = filled_df['date'].min()
+    last_date = filled_df['date'].max()
+    days_active = (last_date - first_date).days
+    
     # Basic return metrics
     avg_daily_return = valid_returns['filled_daily_return'].mean()
     annualized_return = (1 + avg_daily_return) ** 365 - 1
+    annualized_return_2 = (1 + total_return) ** (365 / days_active) - 1
     
     # Risk metrics
     daily_volatility = valid_returns['filled_daily_return'].std()
@@ -196,8 +207,11 @@ def analyze_filled_returns(filled_df):
     
     # Return metrics in a dictionary
     metrics = {
+        'days_active': days_active,
+        'total_return': total_return,
         'avg_daily_return': avg_daily_return,
         'annualized_return': annualized_return,
+        'annualized_return_2': annualized_return_2,
         'daily_volatility': daily_volatility,
         'annualized_volatility': annualized_volatility,
         'sharpe_ratio': sharpe_ratio,
@@ -341,9 +355,9 @@ def create_normalized_equity_chart(filled_df, output_path=None):
 
 def create_equity_and_exposure_chart(filled_df, output_path=None):
     """
-    Create a chart showing normalized equity and net exposure.
+    Create a simplified chart showing normalized equity and net exposure.
     Net exposure is calculated as long_exposure minus short_exposure
-    and displayed as a bar chart.
+    and displayed as a bar chart without normalization.
     
     Args:
         filled_df (pandas.DataFrame): DataFrame with normalized equity and exposure values
@@ -352,102 +366,61 @@ def create_equity_and_exposure_chart(filled_df, output_path=None):
     Returns:
         matplotlib.figure.Figure: The created figure
     """
-    # Calculate net_exposure from long_exposure and short_exposure if available
-    if 'long_exposure' in filled_df.columns and 'short_exposure' in filled_df.columns:
-        # Calculate net exposure as long minus short
-        filled_df['net_exposure'] = filled_df['long_exposure'] - filled_df['short_exposure']
-        # print("Calculated net_exposure from long_exposure and short_exposure")
-    # If only one component is missing, try to infer it
-    elif 'long_exposure' in filled_df.columns and 'short_exposure' not in filled_df.columns:
-        print("Warning: short_exposure column not found. Assuming short_exposure is 0.")
-        filled_df['net_exposure'] = filled_df['long_exposure']
-    elif 'short_exposure' in filled_df.columns and 'long_exposure' not in filled_df.columns:
-        print("Warning: long_exposure column not found. Assuming long_exposure is 0.")
-        filled_df['net_exposure'] = -filled_df['short_exposure']
-    # If both are missing, create a placeholder with a warning
+    # Make a copy of the dataframe to avoid modifying the original
+    df = filled_df.copy()
+    
+    # Calculate net_exposure from long_exposure and short_exposure
+    if 'long_exposure' in df.columns and 'short_exposure' in df.columns:
+        df['net_exposure'] = df['long_exposure'] - df['short_exposure']
+    elif 'long_exposure' in df.columns:
+        df['net_exposure'] = df['long_exposure']
+    elif 'short_exposure' in df.columns:
+        df['net_exposure'] = -df['short_exposure']
     else:
-        print("Warning: Neither long_exposure nor short_exposure columns found.")
+        print("Warning: No exposure data found.")
+        df['net_exposure'] = 0
     
-    # Forward fill any NaN values in net_exposure using the recommended ffill() method
-    filled_df['net_exposure'] = filled_df['net_exposure'].ffill().fillna(0)
+    # Forward fill any NaN values in net_exposure
+    df['net_exposure'] = df['net_exposure'].ffill().fillna(0)
     
-    # Ensure net_exposure is between -1 and 1 (representing -100% to 100% exposure)
-    # Only normalize if values exceed these bounds
-    max_abs_exposure = max(abs(filled_df['net_exposure'].min()), abs(filled_df['net_exposure'].max()))
-    if max_abs_exposure > 1:
-        # print(f"Normalizing exposure values (max absolute value: {max_abs_exposure:.2f})")
-        filled_df['net_exposure'] = filled_df['net_exposure'] / max_abs_exposure
-    
+    # Create figure with two y-axes
     fig, ax1 = plt.subplots(figsize=(12, 7))
     
     # Plot normalized equity on primary axis
-    color = 'tab:blue'
     ax1.set_xlabel('Date')
-    ax1.set_ylabel('Normalized Equity', color=color)
-    ax1.plot(filled_df['date'], filled_df['normalized_equity'], color=color, linewidth=2, label='Normalized Equity')
-    ax1.tick_params(axis='y', labelcolor=color)
+    ax1.set_ylabel('Normalized Equity')
+    ax1.plot(df['date'], df['normalized_equity'], 'b-', linewidth=2, label='Normalized Equity')
     
     # Create secondary Y axis for exposure
     ax2 = ax1.twinx()
     
     # Determine colors for bars based on positive or negative exposure
-    colors = ['green' if x >= 0 else 'red' for x in filled_df['net_exposure']]
+    colors = ['green' if x >= 0 else 'red' for x in df['net_exposure']]
     
     # Plot net exposure as bars on secondary axis
-    # For better visibility with many data points, we might need to reduce the number of bars shown
-    # If we have many days, we'll sample the data to avoid overcrowding
-    if len(filled_df) > 90:  # If more than ~3 months of data, we'll sample
-        # Sample approximately weekly data points
-        sample_rate = max(1, len(filled_df) // 90)
-        sampled_df = filled_df.iloc[::sample_rate].copy()
-        
-        bars = ax2.bar(sampled_df['date'], sampled_df['net_exposure'], 
-                       width=2, # Width in days
-                       color=[colors[i] for i in range(0, len(colors), sample_rate)],
-                       alpha=0.6, label='Net Exposure')
-        
-        # print(f"Sampled net exposure data: showing {len(sampled_df)} out of {len(filled_df)} days")
-    else:
-        # If we have fewer data points, we can show all of them
-        bars = ax2.bar(filled_df['date'], filled_df['net_exposure'], 
-                       width=1, # Width in days
-                       color=colors, alpha=0.6, label='Net Exposure')
+    ax2.bar(df['date'], df['net_exposure'], width=1, color=colors, alpha=0.6, label='Net Exposure')
     
     # Set y-axis label for exposure
-    color = 'black'
-    ax2.set_ylabel('Net Exposure (Long - Short)', color=color)
-    ax2.tick_params(axis='y', labelcolor=color)
+    ax2.set_ylabel('Net Exposure (Long - Short)')
     
     # Add zero line for reference on exposure
     ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
     
-    # Set exposure limits between -1 and 1
-    ax2.set_ylim(-1.1, 1.1)
-    
-    # Format x-axis
+    # Format x-axis for dates
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    
-    # Adjust the date locator based on the date range
-    date_range = (filled_df['date'].max() - filled_df['date'].min()).days
-    if date_range > 730:  # More than 2 years
-        ax1.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 4, 7, 10)))  # Quarterly
-    elif date_range > 180:  # More than 6 months
-        ax1.xaxis.set_major_locator(mdates.MonthLocator())  # Monthly
-    else:
-        ax1.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))  # Weekly (Mondays)
-    
+    ax1.xaxis.set_major_locator(mdates.MonthLocator())
     plt.xticks(rotation=45)
     
     # Add title
-    plt.title(f"Normalized Equity and Net Exposure - {filled_df['account_name'].iloc[0]}", fontsize=14)
+    plt.title(f"Normalized Equity and Net Exposure - {df['account_name'].iloc[0]}")
     
     # Create combined legend for both axes
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
     
-    # Add grid but only on the equity axis to avoid cluttering
-    ax1.grid(True, axis='y', alpha=0.3)
+    # Add grid but only on the equity axis
+    ax1.grid(True, alpha=0.3)
     
     # Adjust layout
     plt.tight_layout()
@@ -508,22 +481,24 @@ def create_returns_distribution_chart(filled_df, output_path=None):
 
 def create_metrics_table(filled_df, output_path=None):
     """
-    Create a table visualization of the performance metrics.
+    Create a table visualization of the performance metrics including total return.
     
     Args:
-        metrics (dict): Dictionary containing performance metrics
-        account_name (str): Name of the account
-        filled_df (pandas.DataFrame): DataFrame with filled data (for date range)
+        filled_df (pandas.DataFrame): DataFrame with filled data
         output_path (str, optional): Path to save the image file
     
     Returns:
         matplotlib.figure.Figure: The created figure
     """
     metrics = analyze_filled_returns(filled_df)
+    
     # Format metrics for display
     formatted_metrics = {
         'Date Range': f"{filled_df['date'].min().strftime('%Y-%m-%d')} to {filled_df['date'].max().strftime('%Y-%m-%d')}",
-        'Annualized Return': f"{metrics['annualized_return']:.2%}",
+        'Days Active': f"{metrics['days_active']} days",
+        'Total Return': f"{metrics['total_return']:.2%}",
+        # 'Annualized Return': f"{metrics['annualized_return']:.2%}",
+        'Annualized Return': f"{metrics['annualized_return_2']:.2%}",
         'Annualized Volatility': f"{metrics['annualized_volatility']:.2%}",
         'Sharpe Ratio': f"{metrics['sharpe_ratio']:.2f}",
         'Sortino Ratio': f"{metrics['sortino_ratio']:.2f}",
