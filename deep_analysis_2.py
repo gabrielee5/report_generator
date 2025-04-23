@@ -3,6 +3,10 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.backends.backend_pdf import PdfPages
 
 from main import get_accounts_from_env
 
@@ -59,7 +63,6 @@ def get_account_data(df, account):
         pandas.DataFrame: Filtered DataFrame for the specified account
     """
     filtered_df = df[df['account_name'] == account]
-    print(f"Filtered data for account '{account}': {len(filtered_df)} rows")
     return filtered_df
 
 def normalize_equity(df):
@@ -150,8 +153,6 @@ def fill_missing_days(normalized_df):
     # First day will have NaN return, set it to 0
     filled_df.loc[filled_df.index[0], 'filled_daily_return'] = 0.0
     
-    print(f"Filled {len(filled_df) - len(normalized_df)} missing days in the date range")
-    
     return filled_df
 
 def analyze_filled_returns(filled_df):
@@ -207,6 +208,385 @@ def analyze_filled_returns(filled_df):
     
     return metrics
 
+def process_data(account_df):
+        normalized_equity = normalize_equity(account_df)
+        filled_equity = fill_missing_days(normalized_equity)
+
+        # add here some calculations if needed 
+        # maybe add net_exposure here
+        return filled_equity
+
+def create_equity_curve_chart(account_df, output_path=None):
+    """
+    Create a chart showing the equity curve along with cumulative net deposits/withdrawals.
+    
+    Args:
+        account_df (pandas.DataFrame): DataFrame containing account data
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Calculate cumulative deposits and withdrawals
+    account_df['net_flow'] = account_df['deposit'] - account_df['withdrawal']
+    account_df['cumulative_flow'] = account_df['net_flow'].cumsum()
+    
+    # Create figure and primary axis
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    
+    # Plot equity curve
+    ax1.plot(account_df['date'], account_df['equity'], 'b-', label='Equity')
+    
+    # Plot cumulative net deposits/withdrawals
+    ax1.plot(account_df['date'], account_df['cumulative_flow'], 'g--', 
+             label='Cumulative Net Deposits/Withdrawals')
+    
+    # Set title and labels for primary axis
+    ax1.set_title(f"Equity Curve - {account_df['account_name'].iloc[0]}")
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Value ($)', color='b')
+    
+    # Format the x-axis to show dates clearly
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax1.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+    
+    # Add grid and legend
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='upper left')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_normalized_equity_chart(filled_df, output_path=None):
+    """
+    Create a chart showing the normalized equity curve.
+    
+    Args:
+        filled_df (pandas.DataFrame): DataFrame with normalized equity values
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot normalized equity
+    ax.plot(filled_df['date'], filled_df['normalized_equity'], 'r-')
+    
+    # Set title and labels
+    ax.set_title(f"Normalized Equity Curve - {filled_df['account_name'].iloc[0]}")
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Normalized Value (Starting at 100)')
+    
+    # Format x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+    
+    # Add reference line at 100
+    ax.axhline(y=100, color='k', linestyle='-', alpha=0.3)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_equity_and_exposure_chart(filled_df, output_path=None):
+    """
+    Create a chart showing normalized equity and net exposure.
+    Net exposure is calculated as long_exposure minus short_exposure
+    and displayed as a bar chart.
+    
+    Args:
+        filled_df (pandas.DataFrame): DataFrame with normalized equity and exposure values
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Calculate net_exposure from long_exposure and short_exposure if available
+    if 'long_exposure' in filled_df.columns and 'short_exposure' in filled_df.columns:
+        # Calculate net exposure as long minus short
+        filled_df['net_exposure'] = filled_df['long_exposure'] - filled_df['short_exposure']
+        # print("Calculated net_exposure from long_exposure and short_exposure")
+    # If only one component is missing, try to infer it
+    elif 'long_exposure' in filled_df.columns and 'short_exposure' not in filled_df.columns:
+        print("Warning: short_exposure column not found. Assuming short_exposure is 0.")
+        filled_df['net_exposure'] = filled_df['long_exposure']
+    elif 'short_exposure' in filled_df.columns and 'long_exposure' not in filled_df.columns:
+        print("Warning: long_exposure column not found. Assuming long_exposure is 0.")
+        filled_df['net_exposure'] = -filled_df['short_exposure']
+    # If both are missing, create a placeholder with a warning
+    else:
+        print("Warning: Neither long_exposure nor short_exposure columns found.")
+    
+    # Forward fill any NaN values in net_exposure using the recommended ffill() method
+    filled_df['net_exposure'] = filled_df['net_exposure'].ffill().fillna(0)
+    
+    # Ensure net_exposure is between -1 and 1 (representing -100% to 100% exposure)
+    # Only normalize if values exceed these bounds
+    max_abs_exposure = max(abs(filled_df['net_exposure'].min()), abs(filled_df['net_exposure'].max()))
+    if max_abs_exposure > 1:
+        # print(f"Normalizing exposure values (max absolute value: {max_abs_exposure:.2f})")
+        filled_df['net_exposure'] = filled_df['net_exposure'] / max_abs_exposure
+    
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    
+    # Plot normalized equity on primary axis
+    color = 'tab:blue'
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Normalized Equity', color=color)
+    ax1.plot(filled_df['date'], filled_df['normalized_equity'], color=color, linewidth=2, label='Normalized Equity')
+    ax1.tick_params(axis='y', labelcolor=color)
+    
+    # Create secondary Y axis for exposure
+    ax2 = ax1.twinx()
+    
+    # Determine colors for bars based on positive or negative exposure
+    colors = ['green' if x >= 0 else 'red' for x in filled_df['net_exposure']]
+    
+    # Plot net exposure as bars on secondary axis
+    # For better visibility with many data points, we might need to reduce the number of bars shown
+    # If we have many days, we'll sample the data to avoid overcrowding
+    if len(filled_df) > 90:  # If more than ~3 months of data, we'll sample
+        # Sample approximately weekly data points
+        sample_rate = max(1, len(filled_df) // 90)
+        sampled_df = filled_df.iloc[::sample_rate].copy()
+        
+        bars = ax2.bar(sampled_df['date'], sampled_df['net_exposure'], 
+                       width=2, # Width in days
+                       color=[colors[i] for i in range(0, len(colors), sample_rate)],
+                       alpha=0.6, label='Net Exposure')
+        
+        # print(f"Sampled net exposure data: showing {len(sampled_df)} out of {len(filled_df)} days")
+    else:
+        # If we have fewer data points, we can show all of them
+        bars = ax2.bar(filled_df['date'], filled_df['net_exposure'], 
+                       width=1, # Width in days
+                       color=colors, alpha=0.6, label='Net Exposure')
+    
+    # Set y-axis label for exposure
+    color = 'black'
+    ax2.set_ylabel('Net Exposure (Long - Short)', color=color)
+    ax2.tick_params(axis='y', labelcolor=color)
+    
+    # Add zero line for reference on exposure
+    ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+    
+    # Set exposure limits between -1 and 1
+    ax2.set_ylim(-1.1, 1.1)
+    
+    # Format x-axis
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    
+    # Adjust the date locator based on the date range
+    date_range = (filled_df['date'].max() - filled_df['date'].min()).days
+    if date_range > 730:  # More than 2 years
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 4, 7, 10)))  # Quarterly
+    elif date_range > 180:  # More than 6 months
+        ax1.xaxis.set_major_locator(mdates.MonthLocator())  # Monthly
+    else:
+        ax1.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))  # Weekly (Mondays)
+    
+    plt.xticks(rotation=45)
+    
+    # Add title
+    plt.title(f"Normalized Equity and Net Exposure - {filled_df['account_name'].iloc[0]}", fontsize=14)
+    
+    # Create combined legend for both axes
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    
+    # Add grid but only on the equity axis to avoid cluttering
+    ax1.grid(True, axis='y', alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path, dpi=150)
+    
+    return fig
+
+def create_returns_distribution_chart(filled_df, output_path=None):
+    """
+    Create a chart plotting daily returns in ascending order.
+    
+    Args:
+        filled_df (pandas.DataFrame): DataFrame with filled daily returns
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Filter out any NaN values
+    returns = filled_df['filled_daily_return'].dropna()
+    
+    # Sort returns in ascending order
+    sorted_returns = returns.sort_values()
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Create index for x-axis (percentile)
+    x = np.linspace(0, 100, len(sorted_returns))
+    
+    # Plot returns
+    ax.plot(x, sorted_returns.values, 'b-')
+    
+    # Add reference line at y=0
+    ax.axhline(y=0, color='r', linestyle='-', alpha=0.5)
+    
+    # Set labels and title
+    ax.set_title(f"Daily Returns Distribution - {filled_df['account_name'].iloc[0]}")
+    ax.set_xlabel('Percentile')
+    ax.set_ylabel('Daily Return')
+    
+    # Format y-axis as percentage
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: '{:.2%}'.format(y)))
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_metrics_table(filled_df, output_path=None):
+    """
+    Create a table visualization of the performance metrics.
+    
+    Args:
+        metrics (dict): Dictionary containing performance metrics
+        account_name (str): Name of the account
+        filled_df (pandas.DataFrame): DataFrame with filled data (for date range)
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    metrics = analyze_filled_returns(filled_df)
+    # Format metrics for display
+    formatted_metrics = {
+        'Date Range': f"{filled_df['date'].min().strftime('%Y-%m-%d')} to {filled_df['date'].max().strftime('%Y-%m-%d')}",
+        'Annualized Return': f"{metrics['annualized_return']:.2%}",
+        'Annualized Volatility': f"{metrics['annualized_volatility']:.2%}",
+        'Sharpe Ratio': f"{metrics['sharpe_ratio']:.2f}",
+        'Sortino Ratio': f"{metrics['sortino_ratio']:.2f}",
+        'Maximum Drawdown': f"{metrics['max_drawdown']:.2%}",
+        'Win Rate (Up Days)': f"{metrics['up_days']:.2%}",
+        'Daily Average Return': f"{metrics['avg_daily_return']:.4%}",
+        'Daily Volatility': f"{metrics['daily_volatility']:.4%}"
+    }
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Hide axes
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Create table
+    table_data = [[k, v] for k, v in formatted_metrics.items()]
+    table = ax.table(cellText=table_data, colLabels=['Metric', 'Value'], 
+                    loc='center', cellLoc='left', colWidths=[0.4, 0.4])
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1, 1.5)  # Adjust table size
+    
+    # Set title
+    ax.set_title(f"Performance Metrics", pad=20, fontsize=14)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def generate_pdf_report(filled_df):
+    """
+    Generate a complete PDF report with all the charts and tables.
+    
+    Args:
+        account_df (pandas.DataFrame): Original account data
+        normalized_df (pandas.DataFrame): Normalized equity data
+        filled_df (pandas.DataFrame): Data with filled missing days
+        metrics (dict): Performance metrics
+        output_path (str): Path to save the PDF report
+    
+    Returns:
+        str: Path to the saved PDF file
+    """
+    account_name = filled_df['account_name'].iloc[0]
+    today = datetime.now().strftime('%Y-%m-%d')
+    output_path = f"deep-analysis-2/{today}/{account_name}_{today}.pdf"
+
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Create PdfPages object to save multiple plots to single PDF
+    with PdfPages(output_path) as pdf:
+        # Add title page
+        fig = plt.figure(figsize=(8.5, 11))
+        fig.text(0.5, 0.6, f"Performance Report", ha='center', fontsize=24)
+        fig.text(0.5, 0.5, f"Account: {account_name}", ha='center', fontsize=18)
+        fig.text(0.5, 0.4, f"Generated on: {datetime.now().strftime('%Y-%m-%d')}", ha='center', fontsize=14)
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        # Add equity curve chart
+        fig = create_equity_curve_chart(filled_df)
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        # Add normalized equity chart
+        fig = create_normalized_equity_chart(filled_df)
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        # Add equity and exposure chart
+        fig = create_equity_and_exposure_chart(filled_df)
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        # Add returns distribution chart
+        fig = create_returns_distribution_chart(filled_df)
+        pdf.savefig(fig)
+        plt.close(fig)
+        
+        # Add metrics table
+        fig = create_metrics_table(filled_df)
+        pdf.savefig(fig)
+        plt.close(fig)
+    
+    print(f"PDF report generated successfully: {output_path}")
+    return output_path
+
 def main():
     db = "db/database.db"
     df = get_data(db)
@@ -215,18 +595,15 @@ def main():
         return
 
     # get active accounts from env
-    # accounts = [account['name'] for account in get_accounts_from_env()]
-    accounts = ['gabriele'] 
+    accounts = [account['name'] for account in get_accounts_from_env()]
+    # accounts = ['gabriele'] 
 
     for account in accounts:
         account_df = get_account_data(df, account)
-        normalized_equity = normalize_equity(account_df)
-        filled_equity = fill_missing_days(normalized_equity)
+        processed_data = process_data(account_df)
 
-        if filled_equity is not None:
-            metrics = analyze_filled_returns(filled_equity)
-            print(metrics)
-
+        if processed_data is not None:
+            report = generate_pdf_report(processed_data)
 
 if __name__ == "__main__":
     main()
