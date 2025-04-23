@@ -101,6 +101,107 @@ class TradingAnalyzer:
             print(f"Error fetching unique accounts: {e}")
             return None
     
+    def fill_missing_days(self, df=None, account_name=None):
+        """Fill missing days in the dataset with interpolated values from the day before and after.
+        
+        Parameters:
+        -----------
+        df : pandas.DataFrame, optional
+            The dataframe to process. If None, data will be fetched based on account_name.
+        account_name : str, optional
+            The account name to fetch data for if df is None.
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            The dataframe with filled missing days.
+        """
+        # Get data if not provided
+        if df is None:
+            if account_name:
+                df = self.get_data_by_account(account_name)
+            else:
+                df = self.get_all_data()
+                
+        if df is None or df.empty:
+            print("No data available for filling missing days")
+            return None
+        
+        # Make a copy to avoid modifying the original dataframe
+        df_filled = df.copy()
+        
+        # Process each account separately
+        filled_dfs = []
+        
+        for name, group in df_filled.groupby('account_name'):
+            # Sort by date
+            group = group.sort_values('date')
+            
+            # Create a complete date range
+            date_range = pd.date_range(start=group['date'].min(), end=group['date'].max(), freq='D')
+            
+            # Create a new dataframe with the complete date range
+            temp_df = pd.DataFrame({'date': date_range})
+            
+            # Merge with the existing data to identify missing days
+            merged_df = pd.merge(temp_df, group, on='date', how='left')
+            
+            # Fill account_name for missing days
+            merged_df['account_name'] = merged_df['account_name'].fillna(name)
+            
+            # Find indices of missing days (rows with NaN values)
+            missing_indices = merged_df[merged_df['equity'].isna()].index
+            
+            for idx in missing_indices:
+                # Find the indices of the previous and next available data points
+                prev_idx = merged_df.iloc[:idx][~merged_df.iloc[:idx]['equity'].isna()].index.max() if idx > 0 else None
+                next_idx = merged_df.iloc[idx+1:][~merged_df.iloc[idx+1:]['equity'].isna()].index.min() if idx < len(merged_df) - 1 else None
+                
+                # Skip if we can't find both previous and next data points
+                if prev_idx is None or next_idx is None:
+                    continue
+                
+                # Get the values from previous and next days
+                prev_values = merged_df.loc[prev_idx]
+                next_values = merged_df.loc[next_idx]
+                
+                # Calculate the number of days between data points
+                days_diff = (next_idx - prev_idx) + 1
+                
+                # Calculate linear interpolation weights
+                weight_next = (idx - prev_idx) / (days_diff - 1)
+                weight_prev = 1 - weight_next
+                
+                # Interpolate numeric columns (focusing on equity and exposure)
+                for col in ['equity', 'long_exposure', 'short_exposure']:
+                    if col in merged_df.columns:
+                        merged_df.loc[idx, col] = weight_prev * prev_values[col] + weight_next * next_values[col]
+                
+                # For other numeric columns, use the same interpolation method
+                for col in ['open_positions', 'long_positions', 'short_positions']:
+                    if col in merged_df.columns:
+                        # Round to nearest integer for count-based columns
+                        merged_df.loc[idx, col] = round(weight_prev * prev_values[col] + weight_next * next_values[col])
+                
+                # For the remaining columns, use forward fill from previous day
+                for col in merged_df.columns:
+                    if col not in ['date', 'account_name', 'equity', 'long_exposure', 'short_exposure', 
+                                'open_positions', 'long_positions', 'short_positions'] and col in merged_df.columns:
+                        merged_df.loc[idx, col] = prev_values[col]
+                
+                # Set trades_today, funding_fees, trading_fees, total_volume, deposit, withdrawal to 0
+                # These are daily metrics that shouldn't be interpolated
+                for col in ['trades_today', 'funding_fees', 'trading_fees', 'total_volume', 'deposit', 'withdrawal']:
+                    if col in merged_df.columns:
+                        merged_df.loc[idx, col] = 0
+            
+            filled_dfs.append(merged_df)
+        
+        # Combine all processed dataframes
+        result_df = pd.concat(filled_dfs)
+        
+        return result_df
+
     def calculate_basic_metrics(self, df=None):
         """Calculate basic metrics from the data."""
         if df is None:
@@ -267,6 +368,9 @@ class TradingAnalyzer:
             print("No data available for analysis")
             return
         
+        # Fill missing days before continuing with calculations
+        df = self.fill_missing_days(df)
+
         # Calculate metrics by account
         metrics = {}
         risk_free_rate = 0.02 / 365  # Assume 2% annual risk-free rate, daily
@@ -382,7 +486,7 @@ class TradingAnalyzer:
         if account_name:
             accounts = [account_name]
         else:
-            accounts = self.get_unique_accounts()
+            accounts = self.get_unique_accounts() # fall back on this
             
         if not accounts:
             print("No accounts found for analysis")
@@ -402,7 +506,6 @@ class TradingAnalyzer:
                 
                 # Calculate normalized equity
                 norm_df = self.calculate_normalized_equity(df.copy())
-                norm_df = self.calculate_daily_returns(norm_df)
                 
                 # 1. Title page
                 plt.figure(figsize=(8.5, 11))
