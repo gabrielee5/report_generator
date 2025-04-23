@@ -72,23 +72,9 @@ class TradingAnalyzer:
             print(f"Error fetching data for account {account_name}: {e}")
             return None
     
-    def get_data_by_date_range(self, start_date, end_date):
-        """Fetch data within a specific date range."""
-        if not self.conn:
-            if not self.connect():
-                return None
-        
-        query = "SELECT * FROM daily_reports WHERE date BETWEEN ? AND ? ORDER BY date"
-        try:
-            df = pd.read_sql_query(query, self.conn, params=(start_date, end_date))
-            df['date'] = pd.to_datetime(df['date'])
-            return df
-        except sqlite3.Error as e:
-            print(f"Error fetching data for date range {start_date} to {end_date}: {e}")
-            return None
-    
     def get_unique_accounts(self):
-        """Get a list of all unique account names."""
+        """Get a list of all unique account names.
+        It would be based to select only active account but this is usefull as fallback."""
         if not self.conn:
             if not self.connect():
                 return None
@@ -117,6 +103,7 @@ class TradingAnalyzer:
             The dataframe with filled missing days.
         """
         # Get data if not provided
+        # to be removed
         if df is None:
             if account_name:
                 df = self.get_data_by_account(account_name)
@@ -449,38 +436,6 @@ class TradingAnalyzer:
         
         return fee_analysis
     
-    def generate_report(self, account_name=None):
-        """Generate a comprehensive report of all metrics."""
-        if account_name:
-            print(f"=== Trading Analysis Report for {account_name} ===")
-        else:
-            print("=== Trading Analysis Report for All Accounts ===")
-        
-        # Get basic metrics
-        basic_metrics = self.calculate_basic_metrics()
-        if basic_metrics is not None:
-            print("\n--- Basic Metrics ---")
-            print(basic_metrics)
-        
-        # Get exposure balance
-        exposure_balance = self.analyze_exposure_balance()
-        if exposure_balance is not None:
-            print("\n--- Exposure Balance ---")
-            print(exposure_balance)
-        
-        # Get performance metrics
-        performance_metrics = self.calculate_performance_metrics()
-        if performance_metrics is not None:
-            print("\n--- Performance Metrics ---")
-            print(performance_metrics)
-        
-        # Get fee impact
-        fee_impact = self.analyze_fee_impact()
-        if fee_impact is not None:
-            print("\n--- Fee Impact Analysis ---")
-            print(fee_impact)
-
-
     def generate_pdf_report(self, account_name=None):
         """Generate a comprehensive PDF report for an account or all accounts."""
         if account_name:
@@ -506,7 +461,7 @@ class TradingAnalyzer:
                 
                 # Calculate normalized equity
                 norm_df = self.calculate_normalized_equity(df.copy())
-                
+
                 # 1. Title page
                 plt.figure(figsize=(8.5, 11))
                 plt.axis('off')
@@ -675,7 +630,6 @@ class TradingAnalyzer:
         
         return True
 
-
 if __name__ == "__main__":
     # Replace with your actual database path
     analyzer = TradingAnalyzer("db/database.db")
@@ -683,8 +637,8 @@ if __name__ == "__main__":
     # Connect to the database
     if analyzer.connect():
         # Get all unique accounts
-        accounts = [account['name'] for account in get_accounts_from_env()]
-        
+        # accounts = [account['name'] for account in get_accounts_from_env()]
+        accounts = ['gabriele']
         # Generate PDF reports for each account
         for account in accounts:
             analyzer.generate_pdf_report(account)
