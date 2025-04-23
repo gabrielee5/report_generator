@@ -219,6 +219,7 @@ def process_data(account_df):
 def create_equity_curve_chart(account_df, output_path=None):
     """
     Create a chart showing the equity curve along with cumulative net deposits/withdrawals.
+    The function ensures a continuous line by connecting data points even when days are missing.
     
     Args:
         account_df (pandas.DataFrame): DataFrame containing account data
@@ -227,28 +228,61 @@ def create_equity_curve_chart(account_df, output_path=None):
     Returns:
         matplotlib.figure.Figure: The created figure
     """
+    # Make a copy to avoid modifying the original dataframe
+    df = account_df.copy()
+    
+    # Ensure data is sorted by date
+    df.sort_values('date', inplace=True)
+    
     # Calculate cumulative deposits and withdrawals
-    account_df['net_flow'] = account_df['deposit'] - account_df['withdrawal']
-    account_df['cumulative_flow'] = account_df['net_flow'].cumsum()
+    df['net_flow'] = df['deposit'] - df['withdrawal']
+    df['cumulative_flow'] = df['net_flow'].cumsum()
+    
+    # Create a complete date range from min to max date
+    min_date = df['date'].min()
+    max_date = df['date'].max()
+    complete_date_range = pd.date_range(start=min_date, end=max_date, freq='D')
+    
+    # Create a new DataFrame with the complete date range
+    complete_df = pd.DataFrame({'date': complete_date_range})
+    
+    # Merge with the original data
+    merged_df = pd.merge(complete_df, df, on='date', how='left')
+    
+    # Forward fill account_name (assuming it's constant)
+    merged_df['account_name'] = merged_df['account_name'].ffill().bfill()
+    
+    # Interpolate equity and cumulative_flow values to fill gaps
+    merged_df['equity'] = merged_df['equity'].interpolate(method='linear')
+    merged_df['cumulative_flow'] = merged_df['cumulative_flow'].interpolate(method='linear')
     
     # Create figure and primary axis
     fig, ax1 = plt.subplots(figsize=(10, 6))
     
-    # Plot equity curve
-    ax1.plot(account_df['date'], account_df['equity'], 'b-', label='Equity')
+    # Plot equity curve - now a continuous line
+    ax1.plot(merged_df['date'], merged_df['equity'], 'b-', label='Equity')
     
-    # Plot cumulative net deposits/withdrawals
-    ax1.plot(account_df['date'], account_df['cumulative_flow'], 'g--', 
+    # Plot cumulative net deposits/withdrawals - also continuous
+    ax1.plot(merged_df['date'], merged_df['cumulative_flow'], 'g--', 
              label='Cumulative Net Deposits/Withdrawals')
     
     # Set title and labels for primary axis
-    ax1.set_title(f"Equity Curve - {account_df['account_name'].iloc[0]}")
+    ax1.set_title(f"Equity Curve - {merged_df['account_name'].iloc[0]}")
     ax1.set_xlabel('Date')
     ax1.set_ylabel('Value ($)', color='b')
     
     # Format the x-axis to show dates clearly
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    ax1.xaxis.set_major_locator(mdates.MonthLocator())
+    
+    # Set appropriate date locator based on the date range
+    date_range = (max_date - min_date).days
+    if date_range > 730:  # More than 2 years
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 4, 7, 10)))  # Quarterly
+    elif date_range > 180:  # More than 6 months
+        ax1.xaxis.set_major_locator(mdates.MonthLocator())  # Monthly
+    else:
+        ax1.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))  # Weekly (Mondays)
+    
     plt.xticks(rotation=45)
     
     # Add grid and legend
