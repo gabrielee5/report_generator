@@ -8,6 +8,9 @@ import os
 from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FuncFormatter
+import time
+
+from main import get_accounts_from_env
 
 class TradingAnalyzer:
     def __init__(self, db_path):
@@ -253,11 +256,6 @@ class TradingAnalyzer:
         
         return df
     
-    def calculate_daily_returns(self, df):
-        """Calculate daily returns from already computed values in the normalized equity calculation."""
-        # Daily returns were already calculated in the normalized equity function
-        return df
-    
     def calculate_performance_metrics(self, account_name=None):
         """Calculate performance metrics including Sharpe and Sortino ratios based on normalized equity."""
         if account_name:
@@ -276,7 +274,6 @@ class TradingAnalyzer:
         for name, group in df.groupby('account_name'):
             # Calculate normalized equity and returns
             norm_df = self.calculate_normalized_equity(group.copy())
-            norm_df = self.calculate_daily_returns(norm_df)
             
             valid_data = norm_df.dropna(subset=['daily_return'])
             if len(valid_data) < 2:
@@ -576,7 +573,6 @@ class TradingAnalyzer:
         return True
 
 
-# Example usage
 if __name__ == "__main__":
     # Replace with your actual database path
     analyzer = TradingAnalyzer("db/database.db")
@@ -584,7 +580,7 @@ if __name__ == "__main__":
     # Connect to the database
     if analyzer.connect():
         # Get all unique accounts
-        accounts = analyzer.get_unique_accounts()
+        accounts = [account['name'] for account in get_accounts_from_env()]
         
         # Generate PDF reports for each account
         for account in accounts:
