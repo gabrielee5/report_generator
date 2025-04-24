@@ -180,8 +180,7 @@ def analyze_filled_returns(filled_df):
     
     # Basic return metrics
     avg_daily_return = valid_returns['filled_daily_return'].mean()
-    annualized_return = (1 + avg_daily_return) ** 365 - 1
-    annualized_return_2 = (1 + total_return) ** (365 / days_active) - 1
+    annualized_return = (1 + total_return) ** (365 / days_active) - 1
     
     # Risk metrics
     daily_volatility = valid_returns['filled_daily_return'].std()
@@ -211,7 +210,6 @@ def analyze_filled_returns(filled_df):
         'total_return': total_return,
         'avg_daily_return': avg_daily_return,
         'annualized_return': annualized_return,
-        'annualized_return_2': annualized_return_2,
         'daily_volatility': daily_volatility,
         'annualized_volatility': annualized_volatility,
         'sharpe_ratio': sharpe_ratio,
@@ -225,7 +223,7 @@ def analyze_filled_returns(filled_df):
 def process_data(account_df):
         normalized_equity = normalize_equity(account_df)
         filled_equity = fill_missing_days(normalized_equity)
-
+        filled_equity.to_csv('test.csv', index=False) # just for testing
         # add here some calculations if needed 
         # maybe add net_exposure here
         return filled_equity
@@ -497,8 +495,7 @@ def create_metrics_table(filled_df, output_path=None):
         'Date Range': f"{filled_df['date'].min().strftime('%Y-%m-%d')} to {filled_df['date'].max().strftime('%Y-%m-%d')}",
         'Days Active': f"{metrics['days_active']} days",
         'Total Return': f"{metrics['total_return']:.2%}",
-        # 'Annualized Return': f"{metrics['annualized_return']:.2%}",
-        'Annualized Return': f"{metrics['annualized_return_2']:.2%}",
+        'Annualized Return': f"{metrics['annualized_return']:.2%}",
         'Annualized Volatility': f"{metrics['annualized_volatility']:.2%}",
         'Sharpe Ratio': f"{metrics['sharpe_ratio']:.2f}",
         'Sortino Ratio': f"{metrics['sortino_ratio']:.2f}",
