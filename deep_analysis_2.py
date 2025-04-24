@@ -1,4 +1,3 @@
-
 import sqlite3
 import pandas as pd
 from datetime import datetime
@@ -9,6 +8,9 @@ import matplotlib.dates as mdates
 from matplotlib.backends.backend_pdf import PdfPages
 
 from main import get_accounts_from_env
+
+PRIMARY_COLOR = '#2a5e35'  # Dark green
+SECONDARY_COLOR = '#d1d1d1'  # Light gray
 
 def get_data(db_path):
     """
@@ -271,17 +273,17 @@ def create_equity_curve_chart(account_df, output_path=None):
     # Create figure and primary axis
     fig, ax1 = plt.subplots(figsize=(10, 6))
     
-    # Plot equity curve - now a continuous line
-    ax1.plot(merged_df['date'], merged_df['equity'], 'b-', label='Equity')
+    # Plot equity curve - now a continuous line with primary color
+    ax1.plot(merged_df['date'], merged_df['equity'], color=PRIMARY_COLOR, linestyle='-', label='Equity')
     
-    # Plot cumulative net deposits/withdrawals - also continuous
-    ax1.plot(merged_df['date'], merged_df['cumulative_flow'], 'g--', 
+    # Plot cumulative net deposits/withdrawals - with secondary color
+    ax1.plot(merged_df['date'], merged_df['cumulative_flow'], color=SECONDARY_COLOR, linestyle='--', 
              label='Cumulative Net Deposits/Withdrawals')
     
     # Set title and labels for primary axis
     ax1.set_title(f"Equity Curve - {merged_df['account_name'].iloc[0]}")
     ax1.set_xlabel('Date')
-    ax1.set_ylabel('Value ($)', color='b')
+    ax1.set_ylabel('Value ($)', color=PRIMARY_COLOR)
     
     # Format the x-axis to show dates clearly
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
@@ -323,8 +325,8 @@ def create_normalized_equity_chart(filled_df, output_path=None):
     """
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Plot normalized equity
-    ax.plot(filled_df['date'], filled_df['normalized_equity'], 'r-')
+    # Plot normalized equity with primary color
+    ax.plot(filled_df['date'], filled_df['normalized_equity'], color=PRIMARY_COLOR, linestyle='-')
     
     # Set title and labels
     ax.set_title(f"Normalized Equity Curve - {filled_df['account_name'].iloc[0]}")
@@ -336,8 +338,8 @@ def create_normalized_equity_chart(filled_df, output_path=None):
     ax.xaxis.set_major_locator(mdates.MonthLocator())
     plt.xticks(rotation=45)
     
-    # Add reference line at 100
-    ax.axhline(y=100, color='k', linestyle='-', alpha=0.3)
+    # Add reference line at 100 with secondary color
+    ax.axhline(y=100, color=SECONDARY_COLOR, linestyle='-', alpha=0.7)
     
     # Add grid
     ax.grid(True, alpha=0.3)
@@ -384,25 +386,27 @@ def create_equity_and_exposure_chart(filled_df, output_path=None):
     # Create figure with two y-axes
     fig, ax1 = plt.subplots(figsize=(12, 7))
     
-    # Plot normalized equity on primary axis
+    # Plot normalized equity on primary axis with primary color
     ax1.set_xlabel('Date')
-    ax1.set_ylabel('Normalized Equity')
-    ax1.plot(df['date'], df['normalized_equity'], 'b-', linewidth=2, label='Normalized Equity')
+    ax1.set_ylabel('Normalized Equity', color=PRIMARY_COLOR)
+    ax1.plot(df['date'], df['normalized_equity'], color=PRIMARY_COLOR, linewidth=2, label='Normalized Equity')
     
     # Create secondary Y axis for exposure
     ax2 = ax1.twinx()
     
     # Determine colors for bars based on positive or negative exposure
-    colors = ['green' if x >= 0 else 'red' for x in df['net_exposure']]
+    positive_color = PRIMARY_COLOR  # Green for positive exposure
+    negative_color = '#a83232'  # Red for negative exposure (keeping this for clarity)
+    colors = [positive_color if x >= 0 else negative_color for x in df['net_exposure']]
     
     # Plot net exposure as bars on secondary axis
     ax2.bar(df['date'], df['net_exposure'], width=1, color=colors, alpha=0.6, label='Net Exposure')
     
     # Set y-axis label for exposure
-    ax2.set_ylabel('Net Exposure (Long - Short)')
+    ax2.set_ylabel('Net Exposure (Long - Short)', color=PRIMARY_COLOR)
     
-    # Add zero line for reference on exposure
-    ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+    # Add zero line for reference on exposure using secondary color
+    ax2.axhline(y=0, color=SECONDARY_COLOR, linestyle='-', alpha=0.7)
     
     # Format x-axis for dates
     ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
@@ -451,11 +455,11 @@ def create_returns_distribution_chart(filled_df, output_path=None):
     # Create index for x-axis (percentile)
     x = np.linspace(0, 100, len(sorted_returns))
     
-    # Plot returns
-    ax.plot(x, sorted_returns.values, 'b-')
+    # Plot returns with primary color
+    ax.plot(x, sorted_returns.values, color=PRIMARY_COLOR, linestyle='-')
     
-    # Add reference line at y=0
-    ax.axhline(y=0, color='r', linestyle='-', alpha=0.5)
+    # Add reference line at y=0 with secondary color
+    ax.axhline(y=0, color=SECONDARY_COLOR, linestyle='-', alpha=0.7)
     
     # Set labels and title
     ax.set_title(f"Daily Returns Distribution - {filled_df['account_name'].iloc[0]}")
@@ -517,10 +521,16 @@ def create_metrics_table(filled_df, output_path=None):
     table = ax.table(cellText=table_data, colLabels=['Metric', 'Value'], 
                     loc='center', cellLoc='left', colWidths=[0.4, 0.4])
     
-    # Style the table
+    # Style the table - using primary color for header
     table.auto_set_font_size(False)
     table.set_fontsize(12)
     table.scale(1, 1.5)  # Adjust table size
+    
+    # Set header style using primary color
+    for key, cell in table.get_celld().items():
+        if key[0] == 0:  # Header row
+            cell.set_facecolor(PRIMARY_COLOR)
+            cell.set_text_props(color='white')
     
     # Set title
     ax.set_title(f"Performance Metrics", pad=20, fontsize=14)
@@ -557,10 +567,11 @@ def generate_pdf_report(filled_df):
     
     # Create PdfPages object to save multiple plots to single PDF
     with PdfPages(output_path) as pdf:
-        # Add title page
+        # Add title page with primary color
         fig = plt.figure(figsize=(8.5, 11))
-        fig.text(0.5, 0.6, f"Performance Report", ha='center', fontsize=24)
-        fig.text(0.5, 0.5, f"Account: {account_name}", ha='center', fontsize=18)
+        fig.patch.set_facecolor('white')
+        fig.text(0.5, 0.6, f"Performance Report", ha='center', fontsize=24, color=PRIMARY_COLOR)
+        fig.text(0.5, 0.5, f"Account: {account_name}", ha='center', fontsize=18, color=PRIMARY_COLOR)
         fig.text(0.5, 0.4, f"Generated on: {datetime.now().strftime('%Y-%m-%d')}", ha='center', fontsize=14)
         pdf.savefig(fig)
         plt.close(fig)
