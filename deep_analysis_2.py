@@ -435,7 +435,8 @@ def create_equity_and_exposure_chart(filled_df, output_path=None):
 
 def create_returns_distribution_chart(filled_df, output_path=None):
     """
-    Create a chart plotting daily returns in ascending order.
+    Create a chart plotting daily returns in ascending order as scatter dots.
+    Includes vertical lines marking the 1st, 5th, and 10th percentiles.
     
     Args:
         filled_df (pandas.DataFrame): DataFrame with filled daily returns
@@ -455,11 +456,33 @@ def create_returns_distribution_chart(filled_df, output_path=None):
     # Create index for x-axis (percentile)
     x = np.linspace(0, 100, len(sorted_returns))
     
-    # Plot returns with primary color
-    ax.plot(x, sorted_returns.values, color=PRIMARY_COLOR, linestyle='-')
+    # Plot returns as scatter dots with primary color
+    ax.scatter(x, sorted_returns.values, color=PRIMARY_COLOR, s=15, alpha=0.7)
     
     # Add reference line at y=0 with secondary color
     ax.axhline(y=0, color=SECONDARY_COLOR, linestyle='-', alpha=0.7)
+    
+    # Add vertical lines at specific percentiles (1st, 5th, and 10th)
+    percentiles_to_mark = [1, 5, 10]
+    
+    # Calculate the actual values at these percentiles
+    for percentile in percentiles_to_mark:
+        # Convert percentile to x-coordinate in the plot
+        x_position = percentile
+        
+        # Find the corresponding y-value (return)
+        index = int(percentile * len(sorted_returns) / 100)
+        if index < len(sorted_returns):
+            y_value = sorted_returns.iloc[index]
+            
+            # Add vertical line
+            ax.axvline(x=x_position, color=SECONDARY_COLOR, linestyle='--', alpha=0.7)
+            
+            # Add annotation with the return value at this percentile
+            label = f"{percentile}%: {y_value:.2%}"
+            ax.text(x_position + 0.5, y_value, label, 
+                    verticalalignment='center', fontsize=9,
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor=SECONDARY_COLOR))
     
     # Set labels and title
     ax.set_title(f"Daily Returns Distribution - {filled_df['account_name'].iloc[0]}")
