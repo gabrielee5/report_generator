@@ -12,6 +12,7 @@ from main import get_accounts_from_env
 PRIMARY_COLOR = '#2a5e35'  # Dark green
 SECONDARY_COLOR = '#d1d1d1'  # Light gray
 
+# GET DATA
 def get_data(db_path):
     """
     Connect to the SQLite database, retrieve all data from daily_reports table,
@@ -53,6 +54,7 @@ def get_data(db_path):
             conn.close()
             print("Database connection closed")
 
+# INDIVIDUAL ACCOUNT REPORT
 def get_account_data(df, account):
     """
     Filter the DataFrame for a specific account and return the filtered DataFrame.
@@ -627,6 +629,457 @@ def generate_pdf_report(filled_df):
     print(f"PDF report generated successfully: {output_path}")
     return output_path
 
+# COMBINED REPORT
+def create_cash_flow_chart(df, output_path=None):
+    """
+    Create a chart showing total deposits and withdrawals over time.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Make a copy and ensure data is sorted by date
+    df_copy = df.copy()
+    df_copy.sort_values('date', inplace=True)
+    
+    # Group by date and calculate total deposits and withdrawals
+    cash_flow_df = df_copy.groupby('date').agg({
+        'deposit': 'sum',
+        'withdrawal': 'sum'
+    }).reset_index()
+    
+    # Calculate cumulative deposits and withdrawals
+    cash_flow_df['cumulative_deposits'] = cash_flow_df['deposit'].cumsum()
+    cash_flow_df['cumulative_withdrawals'] = cash_flow_df['withdrawal'].cumsum()
+    cash_flow_df['net_flow'] = cash_flow_df['cumulative_deposits'] - cash_flow_df['cumulative_withdrawals']
+    
+    # Create figure and axes
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot cumulative deposits with primary color
+    ax.plot(cash_flow_df['date'], cash_flow_df['cumulative_deposits'], 
+            color=PRIMARY_COLOR, linestyle='-', linewidth=2, label='Cumulative Deposits')
+    
+    # Plot cumulative withdrawals with red color
+    withdrawal_color = '#a83232'  # Red for withdrawals
+    ax.plot(cash_flow_df['date'], cash_flow_df['cumulative_withdrawals'], 
+            color=withdrawal_color, linestyle='-', linewidth=2, label='Cumulative Withdrawals')
+    
+    # Plot net flow with secondary color
+    ax.plot(cash_flow_df['date'], cash_flow_df['net_flow'], 
+            color=SECONDARY_COLOR, linestyle='--', linewidth=2, label='Net Cash Flow')
+    
+    # Set title and labels
+    ax.set_title("Cash Flow Analysis - All Accounts")
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Amount ($)')
+    
+    # Format x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+    
+    # Add grid and legend
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper left')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_active_accounts_chart(df, output_path=None):
+    """
+    Create a chart showing the number of active accounts over time.
+    An account is considered active if it has data on a given date.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Make a copy and ensure data is sorted by date
+    df_copy = df.copy()
+    df_copy.sort_values('date', inplace=True)
+    
+    # Group by date and count unique accounts
+    active_accounts_df = df_copy.groupby('date')['account_name'].nunique().reset_index()
+    active_accounts_df.columns = ['date', 'active_accounts']
+    
+    # Create figure and axes
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot active accounts count with bars using primary color
+    ax.bar(active_accounts_df['date'], active_accounts_df['active_accounts'], 
+           color=PRIMARY_COLOR, alpha=0.7, width=1)
+    
+    # Plot line over bars for better visualization
+    ax.plot(active_accounts_df['date'], active_accounts_df['active_accounts'], 
+            color=PRIMARY_COLOR, linewidth=2)
+    
+    # Set title and labels
+    ax.set_title("Active Accounts Over Time")
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Number of Active Accounts')
+    
+    # Format y-axis to show integers
+    ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+    
+    # Format x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_account_contribution_chart(df, output_path=None):
+    """
+    Create a chart showing the contribution of each account to the total AUM over time.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Make a copy and ensure data is sorted by date
+    df_copy = df.copy()
+    df_copy.sort_values(['date', 'account_name'], inplace=True)
+    
+    # Get list of all dates and accounts
+    all_dates = sorted(df_copy['date'].unique())
+    all_accounts = sorted(df_copy['account_name'].unique())
+    
+    # Create a pivot table with dates as index, accounts as columns, and equity as values
+    pivot_df = df_copy.pivot_table(
+        index='date', 
+        columns='account_name', 
+        values='equity',
+        aggfunc='sum'
+    ).fillna(0)
+    
+    # Calculate percentage contribution of each account for each date
+    for date in pivot_df.index:
+        total = pivot_df.loc[date].sum()
+        if total > 0:  # Avoid division by zero
+            pivot_df.loc[date] = (pivot_df.loc[date] / total) * 100
+    
+    # Create figure and axes
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    # Create stacked area chart
+    ax.stackplot(pivot_df.index, [pivot_df[account] for account in pivot_df.columns],
+                 labels=pivot_df.columns, alpha=0.7)
+    
+    # Set title and labels
+    ax.set_title("Account Contribution to Total AUM")
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Contribution (%)')
+    
+    # Format x-axis
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    plt.xticks(rotation=45)
+    
+    # Format y-axis as percentage
+    ax.set_ylim(0, 100)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: '{:.0f}%'.format(y)))
+    
+    # Add legend with small font size
+    ax.legend(loc='upper left', fontsize='small')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_aum_summary_table(df, output_path=None):
+    """
+    Create a table with summary statistics for the total AUM analysis.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Make a copy
+    df_copy = df.copy()
+    
+    # Calculate summary statistics
+    total_accounts = df_copy['account_name'].nunique()
+    date_range = f"{df_copy['date'].min().strftime('%Y-%m-%d')} to {df_copy['date'].max().strftime('%Y-%m-%d')}"
+    days_of_data = (df_copy['date'].max() - df_copy['date'].min()).days
+    
+    # Total deposits and withdrawals
+    total_deposits = df_copy['deposit'].sum()
+    total_withdrawals = df_copy['withdrawal'].sum()
+    net_cash_flow = total_deposits - total_withdrawals
+    
+    # Current AUM (most recent date)
+    latest_date = df_copy['date'].max()
+    current_aum = df_copy[df_copy['date'] == latest_date]['equity'].sum()
+    
+    # Calculate average daily AUM
+    daily_aum = df_copy.groupby('date')['equity'].sum()
+    avg_daily_aum = daily_aum.mean()
+    
+    # Format summary data for display
+    summary_data = {
+        'Total Unique Accounts': f"{total_accounts}",
+        'Date Range': date_range,
+        'Days of Data': f"{days_of_data}",
+        'Total Deposits': f"${total_deposits:,.2f}",
+        'Total Withdrawals': f"${total_withdrawals:,.2f}",
+        'Net Cash Flow': f"${net_cash_flow:,.2f}",
+        'Current AUM': f"${current_aum:,.2f}",
+        'Average Daily AUM': f"${avg_daily_aum:,.2f}"
+    }
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Hide axes
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Create table
+    table_data = [[k, v] for k, v in summary_data.items()]
+    table = ax.table(cellText=table_data, colLabels=['Metric', 'Value'],
+                    loc='center', cellLoc='left', colWidths=[0.4, 0.4])
+    
+    # Style the table - using primary color for header
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1, 1.5)  # Adjust table size
+    
+    # Set header style using primary color
+    for key, cell in table.get_celld().items():
+        if key[0] == 0:  # Header row
+            cell.set_facecolor(PRIMARY_COLOR)
+            cell.set_text_props(color='white')
+    
+    # Set title
+    ax.set_title(f"AUM Summary Statistics", pad=20, fontsize=14)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def create_monthly_summary_chart(df, output_path=None):
+    """
+    Create a chart showing monthly deposits, withdrawals, and change in AUM.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        output_path (str, optional): Path to save the image file
+    
+    Returns:
+        matplotlib.figure.Figure: The created figure
+    """
+    # Make a copy
+    df_copy = df.copy()
+    
+    # Convert date to datetime if it's not already
+    df_copy['date'] = pd.to_datetime(df_copy['date'])
+    
+    # Extract year and month
+    df_copy['year_month'] = df_copy['date'].dt.strftime('%Y-%m')
+    
+    # Group by year-month and calculate monthly metrics
+    monthly_df = df_copy.groupby('year_month').agg({
+        'deposit': 'sum',
+        'withdrawal': 'sum',
+        'date': 'max'  # Get the last day of each month for ordering
+    }).reset_index()
+    
+    # Sort by date
+    monthly_df.sort_values('date', inplace=True)
+    
+    # Calculate net flow
+    monthly_df['net_flow'] = monthly_df['deposit'] - monthly_df['withdrawal']
+    
+    # Create figure with two y-axes
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    
+    # Bar width
+    width = 0.3
+    
+    # Positions for bars
+    x = np.arange(len(monthly_df))
+    
+    # Plot deposits
+    deposit_bars = ax1.bar(x - width/2, monthly_df['deposit'], width, label='Deposits', color=PRIMARY_COLOR, alpha=0.7)
+    
+    # Plot withdrawals as negative values
+    withdrawal_bars = ax1.bar(x + width/2, -monthly_df['withdrawal'], width, label='Withdrawals', color='#a83232', alpha=0.7)
+    
+    # Plot net flow as a line on the same axis
+    ax1.plot(x, monthly_df['net_flow'], marker='o', linestyle='-', color=SECONDARY_COLOR, linewidth=2, label='Net Flow')
+
+    # Set labels for primary axis
+    ax1.set_xlabel('Month')
+    ax1.set_ylabel('Amount ($)')
+    
+    # Set x-tick labels as months
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(monthly_df['year_month'], rotation=45)
+    
+    # Add title
+    plt.title('Monthly Deposits and Withdrawals')
+    
+    # Add grid
+    ax1.grid(True, alpha=0.3)
+    
+    # Add legend
+    ax1.legend(loc='upper left')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save if output path is provided
+    if output_path:
+        plt.savefig(output_path)
+    
+    return fig
+
+def combined_report(df):
+    """
+    Calculate the total assets under management (sum of equity for all accounts) 
+    for each day and generate a comprehensive report with additional analytics.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame containing data for all accounts
+        
+    Returns:
+        str: Path to the saved PDF report
+    """
+    if df is None or df.empty:
+        print("No data to calculate total AUM")
+        return None
+    
+    # Make a copy to avoid modifying the original dataframe
+    df_copy = df.copy()
+    
+    # Group by date and sum equity, deposits, and withdrawals
+    total_df = df_copy.groupby('date').agg({
+        'equity': 'sum',
+        'deposit': 'sum',
+        'withdrawal': 'sum',
+        'long_exposure': 'sum',
+        'short_exposure': 'sum'
+    }).reset_index()
+    
+    # Add account_name for consistency with other functions
+    total_df['account_name'] = 'total'
+    
+    # Process the data in the same way as individual accounts
+    processed_aum = process_data(total_df)
+    
+    if processed_aum is not None:
+        # Generate PDF report with a specific filename for the total AUM
+        today = datetime.now().strftime('%Y-%m-%d')
+        output_path = f"deep-analysis-2/{today}/total_{today}.pdf"
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Create PdfPages object to save multiple plots to single PDF
+        with PdfPages(output_path) as pdf:
+            # Add title page
+            fig = plt.figure(figsize=(8.5, 11))
+            fig.patch.set_facecolor('white')
+            fig.text(0.5, 0.6, f"Total Assets Under Management Report", ha='center', fontsize=24, color=PRIMARY_COLOR)
+            fig.text(0.5, 0.5, f"All Accounts Combined", ha='center', fontsize=18, color=PRIMARY_COLOR)
+            fig.text(0.5, 0.4, f"Generated on: {today}", ha='center', fontsize=14)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add AUM summary table (new)
+            fig = create_aum_summary_table(total_df)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add equity curve chart
+            fig = create_equity_curve_chart(processed_aum)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add normalized equity chart
+            fig = create_normalized_equity_chart(processed_aum)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add active accounts over time chart (new)
+            fig = create_active_accounts_chart(total_df)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add account contribution chart (new)
+            fig = create_account_contribution_chart(total_df)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add cash flow chart (new)
+            fig = create_cash_flow_chart(total_df)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add monthly summary chart (new)
+            fig = create_monthly_summary_chart(total_df)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add equity and exposure chart
+            fig = create_equity_and_exposure_chart(processed_aum)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add returns distribution chart
+            fig = create_returns_distribution_chart(processed_aum)
+            pdf.savefig(fig)
+            plt.close(fig)
+            
+            # Add metrics table
+            fig = create_metrics_table(processed_aum)
+            pdf.savefig(fig)
+            plt.close(fig)
+        
+        print(f"PDF report generated successfully: {output_path}")
+        return output_path
+    
+    return None
+
 def main():
     db = "db/database.db"
     df = get_data(db)
@@ -637,13 +1090,18 @@ def main():
     # get active accounts from env
     accounts = [account['name'] for account in get_accounts_from_env()]
     # accounts = ['gabriele'] 
+    
+    # Calculate and report on total AUM across all accounts
+    total_report = combined_report(df)
 
+    # Process each individual account
     for account in accounts:
         account_df = get_account_data(df, account)
         processed_data = process_data(account_df)
 
         if processed_data is not None:
             report = generate_pdf_report(processed_data)
+
 
 if __name__ == "__main__":
     main()
