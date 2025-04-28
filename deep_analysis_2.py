@@ -845,10 +845,6 @@ def create_aum_summary_table(df, output_path=None):
     latest_date = df_copy['date'].max()
     current_aum = df_copy[df_copy['date'] == latest_date]['equity'].sum()
     
-    # Calculate average daily AUM
-    daily_aum = df_copy.groupby('date')['equity'].sum()
-    avg_daily_aum = daily_aum.mean()
-    
     # Format summary data for display
     summary_data = {
         'Total Unique Accounts': f"{total_accounts}",
@@ -858,7 +854,7 @@ def create_aum_summary_table(df, output_path=None):
         'Total Withdrawals': f"${total_withdrawals:,.2f}",
         'Net Cash Flow': f"${net_cash_flow:,.2f}",
         'Current AUM': f"${current_aum:,.2f}",
-        'Average Daily AUM': f"${avg_daily_aum:,.2f}"
+        'PnL': f"${current_aum - net_cash_flow:,.2f}"
     }
     
     # Create figure
@@ -1019,14 +1015,14 @@ def combined_report(df):
             # Add title page
             fig = plt.figure(figsize=(8.5, 11))
             fig.patch.set_facecolor('white')
-            fig.text(0.5, 0.6, f"Total Assets Under Management Report", ha='center', fontsize=24, color=PRIMARY_COLOR)
+            fig.text(0.5, 0.6, f"Report", ha='center', fontsize=24, color=PRIMARY_COLOR)
             fig.text(0.5, 0.5, f"All Accounts Combined", ha='center', fontsize=18, color=PRIMARY_COLOR)
             fig.text(0.5, 0.4, f"Generated on: {today}", ha='center', fontsize=14)
             pdf.savefig(fig)
             plt.close(fig)
             
             # Add AUM summary table (new)
-            fig = create_aum_summary_table(total_df)
+            fig = create_aum_summary_table(df_copy)
             pdf.savefig(fig)
             plt.close(fig)
             
@@ -1035,18 +1031,13 @@ def combined_report(df):
             pdf.savefig(fig)
             plt.close(fig)
             
-            # Add normalized equity chart
-            fig = create_normalized_equity_chart(processed_aum)
-            pdf.savefig(fig)
-            plt.close(fig)
-            
             # Add active accounts over time chart (new)
-            fig = create_active_accounts_chart(total_df)
+            fig = create_active_accounts_chart(df_copy)
             pdf.savefig(fig)
             plt.close(fig)
             
             # Add account contribution chart (new)
-            fig = create_account_contribution_chart(total_df)
+            fig = create_account_contribution_chart(df_copy)
             pdf.savefig(fig)
             plt.close(fig)
             
@@ -1057,21 +1048,6 @@ def combined_report(df):
             
             # Add monthly summary chart (new)
             fig = create_monthly_summary_chart(total_df)
-            pdf.savefig(fig)
-            plt.close(fig)
-            
-            # Add equity and exposure chart
-            fig = create_equity_and_exposure_chart(processed_aum)
-            pdf.savefig(fig)
-            plt.close(fig)
-            
-            # Add returns distribution chart
-            fig = create_returns_distribution_chart(processed_aum)
-            pdf.savefig(fig)
-            plt.close(fig)
-            
-            # Add metrics table
-            fig = create_metrics_table(processed_aum)
             pdf.savefig(fig)
             plt.close(fig)
         
